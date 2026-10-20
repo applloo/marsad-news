@@ -1,91 +1,56 @@
 import streamlit as st
 import requests
-import xml.etree.ElementTree as ET
-from datetime import datetime
-import re
+from datetime import datetime, timedelta
 
-st.set_page_config(page_title="مرصد الأخبار - MARSAD NEWS", page_icon="🛰️", layout="wide")
+st.set_page_config(page_title="مرصد - GDELT العالمي", page_icon="🌍", layout="wide")
+st.title("🌍 مرصد - محرك GDELT العالمي")
+st.caption("نفس فكرة Claude - يبحث في آلاف المواقع")
 
-st.markdown("""
-<style>
-body {direction: rtl;}
-h1 {color: #d32f2f; text-align: center;}
-</style>
-""", unsafe_allow_html=True)
+def translate_query(ar_text):
+    mapping = {"مصر":"Egypt","اليمن":"Yemen","السعودية":"Saudi","غزة":"Gaza","السيسي":"【entity-Sisi¦canonical_name=Abdel Fattah el-Sisi】","إسرائيل":"Israel","ترامب":"【entity-Trump¦canonical_name=Donald Trump】"}
+    en = ar_text
+    he = ar_text
+    for ar,en_word in mapping.items():
+        if ar in ar_text: en = en.replace(ar,en_word)
+    return en, he
 
-st.title("🛰️ مرصد الأخبار - MARSAD NEWS")
-st.markdown("### مباشر من المصادر العالمية | Yemen - Egypt - العالم")
-
-def parse_rss(url):
+def search_gdelt(query_en, time_filter, geo_filter):
+    now = datetime.utcnow()
+    hours = {"من ساعتين":2,"اليوم":24,"أمس":48,"من يومين":48,"أسبوع":168,"آخر 30 يوم":720}.get(time_filter,2160)
+    start = (now - timedelta(hours=hours)).strftime("%Y%m%d%H%M%S")
+    end = now.strftime("%Y%m%d%H%M%S")
+    source_filter = ""
+    if geo_filter=="مصادر أمريكية فقط": source_filter=" sourcecountry:US"
+    elif geo_filter=="مصادر إسرائيلية فقط": source_filter=" sourcecountry:IS"
+    elif geo_filter=="مصادر بريطانية فقط": source_filter=" sourcecountry:UK"
+    full_query = f"({query_en}){source_filter}"
+    url = "https://api.gdeltproject.org/api/v2/doc/doc"
+    params = {"query":full_query,"mode":"artlist","maxrecords":50,"format":"json","startdatetime":start,"enddatetime":end,"sort":"datedesc"}
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        r = requests.get(url, timeout=20, headers=headers)
-        r.encoding = 'utf-8'
-        root = ET.fromstring(r.content)
-        items = []
-        for item in root.findall('.//item')[:25]:
-            title = item.find('title')
-            link = item.find('link')
-            desc = item.find('description')
-            pub = item.find('pubDate')
-            items.append({
-                'title': title.text if title is not None else 'بدون عنوان',
-                'link': link.text if link is not None else '#',
-                'summary': re.sub('<[^<]+?>', '', desc.text)[:500] if desc is not None and desc.text else '',
-                'published': pub.text if pub is not None else ''
-            })
-        return items
+        r = requests.get(url, params=params, timeout=20)
+        return r.json().get('articles',[])
     except Exception as e:
         return []
 
-# روابط شغالة 100% ومجربة
-FEEDS = {
-    "🌍 الأخبار العاجلة - Google": "https://news.google.com/rss?hl=ar&gl=EG&ceid=EG:ar",
-    "🇾🇪 اليمن - مباشر": "https://news.google.com/rss/search?q=Yemen+اليمن&hl=ar&gl=EG&ceid=EG:ar",
-    "🇪🇬 مصر - مباشر": "https://news.google.com/rss/search?q=Egypt+مصر&hl=ar&gl=EG&ceid=EG:ar",
-    "🇮🇱 إسرائيل - Haaretz & أخبار": "https://news.google.com/rss/search?q=Israel+اسرائيل&hl=ar&gl=EG&ceid=EG:ar",
-    "🇺🇸 أمريكا - Axios": "https://news.google.com/rss/search?q=Axios+USA&hl=ar&gl=EG&ceid=EG:ar",
-    "💰 الاقتصاد - Bloomberg": "https://news.google.com/rss/search?q=Bloomberg+اقتصاد&hl=ar&gl=EG&ceid=EG:ar",
-    "🌐 بي بي سي عربي": "http://feeds.bbci.co.uk/arabic/rss.xml",
-}
+# Sidebar
+st.sidebar.title("⚙️ الفلاتر")
+geo = st.sidebar.selectbox("المصادر:", ["جميع المصادر","مصادر أمريكية فقط","مصادر إسرائيلية فقط","مصادر بريطانية فقط"])
+time_f = st.sidebar.selectbox("الوقت:", ["من ساعتين","اليوم","أمس","من يومين","أسبوع","آخر 30 يوم"])
 
-col1, col2 = st.columns([3,1])
-with col2:
-    source = st.selectbox("اختر المصدر:", list(FEEDS.keys()))
-    search = st.text_input("🔍 ابحث في الأخبار:", placeholder="مثال: غزة - اليمن - ترامب")
-    if st.button("🔄 تحديث", use_container_width=True):
-        st.rerun()
-
-with col1:
-    st.success(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')} بتوقيت القاهرة - مرصد إيهاب - يعمل ✅")
-    
-    url = FEEDS[source]
-    if search:
-        url = f"https://news.google.com/rss/search?q={search}&hl=ar&gl=EG&ceid=EG:ar"
-    
-    with st.spinner(f"جاري جلب الأخبار من {source}..."):
-        news = parse_rss(url)
-        if not news:
-            st.warning("لا يوجد أخبار حاليا، جرب مصدر آخر أو ابحث بكلمة مختلفة")
+q_ar = st.text_input("🔍 اكتب بالعربية:", placeholder="مثال: مصر السعودية، اليمن")
+if q_ar:
+    q_en,q_he = translate_query(q_ar)
+    st.info(f"AR: {q_ar} | EN: {q_en} | HE: {q_he}")
+    if st.button("🚀 ابحث في GDELT الآن", type="primary", use_container_width=True):
+        with st.spinner(f"يبحث في آلاف المواقع..."):
+            articles = search_gdelt(q_en, time_f, geo)
+        if not articles:
+            st.warning("لا يوجد نتائج")
         else:
-            st.info(f"✅ تم جلب {len(news)} خبر")
-            for i, entry in enumerate(news):
-                with st.expander(f"{i+1}. {entry['title']}"):
-                    if entry['summary']:
-                        st.write(entry['summary'])
-                    st.markdown(f"[🔗 فتح الخبر الأصلي]({entry['link']})")
-                    if entry['published']:
-                        st.caption(f"🕒 {entry['published']}")
-
-st.markdown("---")
-st.markdown("""
-### 🎉 مبروك! مرصدك اشتغل رسمي
-**رابطك الدائم:**
-`https://marsad-news-cadykshetxotu8ugsfaz88.streamlit.app`
-
-**المميزات:**
-- ✅ بحث عربي وإنجليزي
-- ✅ أخبار اليمن ومصر والعالم لحظيا
-- ✅ يشتغل 24 ساعة على Streamlit Cloud
-- ✅ بدون أخطاء - مجرب
-""")
+            st.success(f"✅ وجد {len(articles)} مقال")
+            for art in articles[:30]:
+                with st.expander(f"{art.get('title','')} - {art.get('sourcecountry','')}"):
+                    st.write(f"**Domain:** {art.get('domain','')}")
+                    st.write(f"**تاريخ الرصد:** {art.get('seendate','')} (وقت التقاط GDELT)")
+                    st.link_button("🔗 فتح المصدر", art.get('url',''))
+                    st.link_button("📖 ترجم المقال (يفتح تبويب)", f"https://translate.google.com/translate?sl=auto&tl=ar&u={art.get('url','')}")
