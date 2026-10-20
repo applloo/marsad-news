@@ -2,6 +2,7 @@
 import streamlit as st
 import requests
 import time
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 import html
@@ -18,6 +19,7 @@ st.markdown("""
     .news-title { color: #1a0dab; font-size: 1.3rem; font-weight: bold; margin-bottom: 5px; }
     .news-meta { color: #006621; font-size: 0.85rem; margin-bottom: 12px; }
     .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 0.75rem; background-color: #e0e0e0; margin-left: 5px;}
+    .search-terms { background: #e8f0fe; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9rem;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -35,33 +37,18 @@ COUNTRY_MAP = {
 }
 
 SOURCE_MAP = {
-    "nytimes.com": "نيويورك تايمز",
-    "washingtonpost.com": "واشنطن بوست",
-    "cnn.com": "سي إن إن (CNN)",
-    "foxnews.com": "فوكس نيوز",
-    "wsj.com": "وول ستريت جورنال",
-    "bloomberg.com": "بلومبيرغ",
-    "reuters.com": "رويترز",
-    "apnews.com": "أسوشيتد برس",
-    "bbc.com": "بي بي سي (BBC)",
-    "theguardian.com": "الجارديان",
-    "aljazeera.net": "الجزيرة",
-    "alarabiya.net": "العربية",
-    "skynewsarabia.com": "سكاي نيوز عربية",
-    "thegazette.com": "ذا جازيت",
-    "kitabat.com": "كتابات",
-    "haaretz.com": "هآرتس",
-    "ynet.co.il": "واي نت (Ynet)",
-    "jpost.com": "جيروزاليم بوست",
-    "timesofisrael.com": "تايمز أوف إسرائيل",
-    "axios.com": "أكسيوس",
-    "nbcnews.com": "إن بي سي (NBC)",
-    "cbsnews.com": "سي بي إس (CBS)",
-    "abcnews.go.com": "إيه بي سي (ABC)",
-    "usatoday.com": "يو إس إيه توداي",
-    "politico.com": "بوليتيكو",
-    "rt.com": "روسيا اليوم (RT)",
-    "independent.co.uk": "الإندبندنت"
+    "nytimes.com": "نيويورك تايمز", "washingtonpost.com": "واشنطن بوست",
+    "cnn.com": "سي إن إن (CNN)", "foxnews.com": "فوكس نيوز",
+    "wsj.com": "وول ستريت جورنال", "bloomberg.com": "بلومبيرغ",
+    "reuters.com": "رويترز", "apnews.com": "أسوشيتد برس",
+    "bbc.com": "بي بي سي (BBC)", "theguardian.com": "الجارديان",
+    "aljazeera.net": "الجزيرة", "alarabiya.net": "العربية",
+    "skynewsarabia.com": "سكاي نيوز عربية", "thegazette.com": "ذا جازيت",
+    "kitabat.com": "كتابات", "haaretz.com": "هآرتس",
+    "ynet.co.il": "واي نت (Ynet)", "jpost.com": "جيروزاليم بوست",
+    "timesofisrael.com": "تايمز أوف إسرائيل", "axios.com": "أكسيوس",
+    "nbcnews.com": "إن بي سي (NBC)", "cbsnews.com": "سي بي إس (CBS)",
+    "abcnews.go.com": "إيه بي سي (ABC)", "usatoday.com": "يو إس إيه توداي"
 }
 
 def get_country_ar(code):
@@ -70,27 +57,26 @@ def get_country_ar(code):
 
 def get_source_ar(domain):
     d = domain.lower().replace("www.", "")
-    if d in SOURCE_MAP:
-        return SOURCE_MAP[d]
-    # إذا لم يكن في القائمة، يستخرج الاسم من النطاق
+    if d in SOURCE_MAP: return SOURCE_MAP[d]
     name = d.split(".")[0].capitalize()
     return f"صحيفة {name}"
 
-# 3. دوال الترجمة (مع استخدام الكاش لسرعة الأداء وتجنب الحظر)
+# 3. دوال الترجمة (محسنة)
 @st.cache_data(ttl=3600, show_spinner=False)
 def translate_text(text, target_lang):
-    if not text or len(text.strip()) < 2: return text
+    text = text.strip()
+    if not text or len(text) < 2: return text
     try:
         url = "https://translate.googleapis.com/translate_a/single"
-        params = {"client": "gtx", "sl": "auto", "tl": target_lang, "dt": "t", "q": text}
+        params = {"client": "gtx", "sl": "ar", "tl": target_lang, "dt": "t", "q": text}
         res = requests.get(url, params=params, timeout=5)
         if res.status_code == 200:
-            return "".join([sentence[0] for sentence in res.json()[0] if sentence[0]])
+            return "".join([sentence[0] for sentence in res.json()[0] if sentence[0]]).replace('"', '')
         return text
     except Exception:
         return text
 
-# 4. دالة جلب الأخبار من GDELT (مُحسنة لتوسيع نطاق البحث)
+# 4. دالة جلب الأخبار من GDELT
 def fetch_news(query, country_filter, hours_back):
     end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(hours=hours_back)
@@ -98,14 +84,13 @@ def fetch_news(query, country_filter, hours_back):
     start_str = start_date.strftime("%Y%m%d%H%M%S")
     end_str = end_date.strftime("%Y%m%d%H%M%S")
     
-    # تحسين صيغة البحث وتخفيف القيود
     gdelt_query = query
     if country_filter == "US":
-        gdelt_query = f'{query} (domain:nytimes.com OR domain:washingtonpost.com OR domain:cnn.com OR domain:foxnews.com OR domain:wsj.com OR domain:bloomberg.com OR domain:reuters.com OR domain:apnews.com)'
+        gdelt_query = f'({query}) (domain:nytimes.com OR domain:washingtonpost.com OR domain:cnn.com OR domain:foxnews.com OR domain:wsj.com OR domain:bloomberg.com OR domain:reuters.com OR domain:apnews.com)'
     elif country_filter == "UK":
-        gdelt_query = f'{query} sourcecountry:UK'
+        gdelt_query = f'({query}) sourcecountry:UK'
     elif country_filter == "IS":
-        gdelt_query = f'{query} sourcecountry:IS'
+        gdelt_query = f'({query}) sourcecountry:IS'
 
     params = {
         "query": gdelt_query,
@@ -138,10 +123,15 @@ def get_article_type(url):
 # ================= الواجهة والتفاعل =================
 
 st.title("محرك البحث الإخباري المتقدم 🔍")
-st.markdown("ابحث باللغة العربية، وسيقوم النظام بالبحث في المصادر العالمية والمحلية بعد الترجمة.")
+st.markdown("💡 **نصيحة:** إذا كنت تبحث عن عدة دول أو أشخاص، افصل بينها بفاصلة (،) مثال: `مصر، السعودية، وزير الخارجية المصري`")
 
 # حقل البحث
-search_query = st.text_input("أدخل كلمات البحث (مثال: مصر السعودية، الشرق الأوسط، إلخ):")
+search_query = st.text_input("أدخل كلمات البحث:", placeholder="مثال: اليمن، السعودية، مصر")
+
+# خيارات الدمج للكلمات المتعددة
+join_logic = st.radio("كيف تريد البحث عن هذه الكلمات؟", 
+                      ["البحث عن أي عبارة منها (OR) - نتائج أكثر", "البحث عن جميع العبارات معاً (AND) - نتائج دقيقة"], 
+                      horizontal=True)
 
 # الفلاتر
 col1, col2, col3 = st.columns(3)
@@ -152,16 +142,10 @@ with col2:
 with col3:
     type_choice = st.selectbox("نوع المقال:", ["الكل", "خبر", "تحليل", "رأي"])
 
-# تعيين قيم الفلاتر
 time_map = {"آخر 24 ساعة": 24, "آخر 48 ساعة": 48, "آخر أسبوع": 168, "آخر 30 يوم": 720}
 hours = time_map[time_choice]
 
-source_map = {
-    "جميع المصادر": None,
-    "مصادر أمريكية فقط": "US",
-    "مصادر إسرائيلية فقط": "IS",
-    "مصادر بريطانية فقط": "UK"
-}
+source_map = {"جميع المصادر": None, "مصادر أمريكية فقط": "US", "مصادر إسرائيلية فقط": "IS", "مصادر بريطانية فقط": "UK"}
 country = source_map[source_choice]
 
 if st.button("ابحث الآن", use_container_width=True, type="primary"):
@@ -169,25 +153,37 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
         st.warning("الرجاء إدخال كلمة بحث أولاً.")
     else:
         with st.status("جاري معالجة طلبك...", expanded=True) as status:
-            # 1. ترجمة الكلمات
-            st.write("🔄 جاري ترجمة مصطلحات البحث...")
-            query_en = translate_text(search_query, "en")
-            query_he = translate_text(search_query, "iw")
+            # 1. تفكيك الكلمات عبر الفاصلة العربية أو الإنجليزية
+            raw_terms = re.split(r'[،,]', search_query)
+            terms = [t.strip() for t in raw_terms if t.strip()]
             
-            st.write(f"🇬🇧 الإنجليزية: {query_en}")
-            st.write(f"🇮🇱 العبرية: {query_he}")
+            st.write("🔄 جاري تفكيك وترجمة مصطلحات البحث...")
             
-            # 2. بناء استعلام ذكي
+            en_terms = []
+            he_terms = []
+            
+            for t in terms:
+                en = translate_text(t, "en")
+                he = translate_text(t, "iw")
+                en_terms.append(f'"{en}"') # وضع الكلمة بين علامتي تنصيص لضمان دقة GDELT
+                he_terms.append(f'"{he}"')
+                st.write(f"▪️ **{t}** ➡️ 🇬🇧 {en} | 🇮🇱 {he}")
+            
+            # 2. بناء استعلام ذكي مدمج
+            logic_operator = " OR " if "(OR)" in join_logic else " AND "
+            en_query = logic_operator.join(en_terms)
+            he_query = logic_operator.join(he_terms)
+            
             if country == "IS":
-                final_query = f'("{query_en}" OR "{query_he}")'
+                final_query = f"({en_query}) OR ({he_query})"
             else:
-                final_query = f'"{query_en}"'
+                final_query = f"{en_query}"
                 
             # 3. جلب الأخبار
-            st.write("📡 جاري البحث في المصادر الإخبارية...")
+            st.write("📡 جاري جلب الأخبار من قواعد البيانات المباشرة...")
             articles = fetch_news(final_query, country, hours)
             
-            # 4. فلترة النوع (خبر، تحليل، رأي)
+            # 4. فلترة النوع
             filtered_articles = []
             for art in articles:
                 art_type = get_article_type(art.get("url", ""))
@@ -199,7 +195,7 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
 
         # ================= عرض النتائج =================
         if not filtered_articles:
-            st.info("لا توجد نتائج مطابقة لبحثك في هذا النطاق الزمني أو المصدر. جرب اختيار 'الكل' في الفلاتر أو توسيع النطاق الزمني.")
+            st.info("لا توجد نتائج مطابقة لبحثك في هذا النطاق الزمني أو المصدر. جرب تغيير 'AND' إلى 'OR' أو وسّع النطاق الزمني.")
         else:
             for art in filtered_articles:
                 orig_title = art.get("title", "بدون عنوان")
@@ -208,12 +204,10 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
                 seen_date = art.get("seendate", "")
                 source_country = art.get("sourcecountry", "")
                 
-                # ترجمة وتنسيق البيانات
                 title_ar = translate_text(orig_title, "ar")
                 country_ar = get_country_ar(source_country)
                 source_name_ar = get_source_ar(domain)
                 
-                # تنسيق التاريخ لتوقيت مصر
                 try:
                     dt = datetime.strptime(seen_date, "%Y%m%dT%H%M%SZ")
                     dt_cairo = dt.replace(tzinfo=timezone.utc) + timedelta(hours=3)
@@ -221,7 +215,6 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
                 except:
                     date_str = seen_date
 
-                # رسم بطاقة الخبر
                 with st.container():
                     st.markdown(f"""
                     <div class='news-card'>
@@ -229,14 +222,13 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
                         <div class='en-text'>{html.escape(orig_title)}</div>
                         <div class='news-meta'>
                             <span>📰 {html.escape(source_name_ar)} ({html.escape(domain)})</span> | 
-                            <span>🌍 الدولة: {html.escape(country_ar)}</span> | 
+                            <span>🌍 {html.escape(country_ar)}</span> | 
                             <span>🕒 {date_str}</span>
                             <span class='badge'>{art['ctype']}</span>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # أزرار الإجراءات
                     c1, c2 = st.columns(2)
                     with c1:
                         st.link_button("🔗 المصدر الأصلي", url, use_container_width=True)
