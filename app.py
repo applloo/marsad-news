@@ -21,6 +21,61 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- قواميس لترجمة أسماء الدول والمصادر ---
+COUNTRY_MAP = {
+    "US": "أمريكا 🇺🇸", "UK": "بريطانيا 🇬🇧", "IS": "إسرائيل 🇮🇱",
+    "EG": "مصر 🇪🇬", "SA": "السعودية 🇸🇦", "AE": "الإمارات 🇦🇪",
+    "QA": "قطر 🇶🇦", "JO": "الأردن 🇯🇴", "LB": "لبنان 🇱🇧",
+    "SY": "سوريا 🇸🇾", "IQ": "العراق 🇮🇶", "KW": "الكويت 🇰🇼",
+    "OM": "عُمان 🇴🇲", "BH": "البحرين 🇧🇭", "YE": "اليمن 🇾🇪",
+    "TR": "تركيا 🇹🇷", "IR": "إيران 🇮🇷", "FR": "فرنسا 🇫🇷",
+    "DE": "ألمانيا 🇩🇪", "RU": "روسيا 🇷🇺", "CN": "الصين 🇨🇳",
+    "IN": "الهند 🇮🇳", "PK": "باكستان 🇵🇰", "AF": "أفغانستان 🇦🇫",
+    "PS": "فلسطين 🇵🇸", "LY": "ليبيا 🇱🇾", "SD": "السودان 🇸🇩"
+}
+
+SOURCE_MAP = {
+    "nytimes.com": "نيويورك تايمز",
+    "washingtonpost.com": "واشنطن بوست",
+    "cnn.com": "سي إن إن (CNN)",
+    "foxnews.com": "فوكس نيوز",
+    "wsj.com": "وول ستريت جورنال",
+    "bloomberg.com": "بلومبيرغ",
+    "reuters.com": "رويترز",
+    "apnews.com": "أسوشيتد برس",
+    "bbc.com": "بي بي سي (BBC)",
+    "theguardian.com": "الجارديان",
+    "aljazeera.net": "الجزيرة",
+    "alarabiya.net": "العربية",
+    "skynewsarabia.com": "سكاي نيوز عربية",
+    "thegazette.com": "ذا جازيت",
+    "kitabat.com": "كتابات",
+    "haaretz.com": "هآرتس",
+    "ynet.co.il": "واي نت (Ynet)",
+    "jpost.com": "جيروزاليم بوست",
+    "timesofisrael.com": "تايمز أوف إسرائيل",
+    "axios.com": "أكسيوس",
+    "nbcnews.com": "إن بي سي (NBC)",
+    "cbsnews.com": "سي بي إس (CBS)",
+    "abcnews.go.com": "إيه بي سي (ABC)",
+    "usatoday.com": "يو إس إيه توداي",
+    "politico.com": "بوليتيكو",
+    "rt.com": "روسيا اليوم (RT)",
+    "independent.co.uk": "الإندبندنت"
+}
+
+def get_country_ar(code):
+    if not code: return "دولي 🌐"
+    return COUNTRY_MAP.get(code.upper(), f"{code} 🌐")
+
+def get_source_ar(domain):
+    d = domain.lower().replace("www.", "")
+    if d in SOURCE_MAP:
+        return SOURCE_MAP[d]
+    # إذا لم يكن في القائمة، يستخرج الاسم من النطاق
+    name = d.split(".")[0].capitalize()
+    return f"صحيفة {name}"
+
 # 3. دوال الترجمة (مع استخدام الكاش لسرعة الأداء وتجنب الحظر)
 @st.cache_data(ttl=3600, show_spinner=False)
 def translate_text(text, target_lang):
@@ -46,7 +101,6 @@ def fetch_news(query, country_filter, hours_back):
     # تحسين صيغة البحث وتخفيف القيود
     gdelt_query = query
     if country_filter == "US":
-        # استخدام domain بدلاً من domainis لتوسيع فرص المطابقة
         gdelt_query = f'{query} (domain:nytimes.com OR domain:washingtonpost.com OR domain:cnn.com OR domain:foxnews.com OR domain:wsj.com OR domain:bloomberg.com OR domain:reuters.com OR domain:apnews.com)'
     elif country_filter == "UK":
         gdelt_query = f'{query} sourcecountry:UK'
@@ -57,13 +111,12 @@ def fetch_news(query, country_filter, hours_back):
         "query": gdelt_query,
         "mode": "ArtList",
         "format": "json",
-        "maxrecords": 100,  # زيادة عدد النتائج المستردة قبل الفلترة
+        "maxrecords": 100,
         "sort": "DateDesc",
         "startdatetime": start_str,
         "enddatetime": end_str
     }
     
-    # إضافة محاولات اتصال متعددة لتجنب السقوط المؤقت لسيرفرات GDELT
     for _ in range(3):
         try:
             url = "https://api.gdeltproject.org/api/v2/doc/doc"
@@ -153,9 +206,12 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
                 url = art.get("url", "#")
                 domain = art.get("domain", "مصدر غير معروف")
                 seen_date = art.get("seendate", "")
+                source_country = art.get("sourcecountry", "")
                 
-                # ترجمة العنوان للعربية للعرض
+                # ترجمة وتنسيق البيانات
                 title_ar = translate_text(orig_title, "ar")
+                country_ar = get_country_ar(source_country)
+                source_name_ar = get_source_ar(domain)
                 
                 # تنسيق التاريخ لتوقيت مصر
                 try:
@@ -172,7 +228,8 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
                         <div class='news-title'>{html.escape(title_ar)}</div>
                         <div class='en-text'>{html.escape(orig_title)}</div>
                         <div class='news-meta'>
-                            <span>🌐 {html.escape(domain)}</span> | 
+                            <span>📰 {html.escape(source_name_ar)} ({html.escape(domain)})</span> | 
+                            <span>🌍 الدولة: {html.escape(country_ar)}</span> | 
                             <span>🕒 {date_str}</span>
                             <span class='badge'>{art['ctype']}</span>
                         </div>
