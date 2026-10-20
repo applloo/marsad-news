@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 import re
 import time
@@ -307,3 +308,4 @@ if items is not None:
             if st.button("📝 تلخيص", key=f"sum{i}"):
                 with st.spinner("يلخص…"): summaries[url] = summarize(url)
             if url in summaries: st.info(summaries[url])
+
