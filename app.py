@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
 import requests
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 import html
@@ -34,44 +35,45 @@ def translate_text(text, target_lang):
     except Exception:
         return text
 
-# 4. دالة جلب الأخبار من GDELT
+# 4. دالة جلب الأخبار من GDELT (مُحسنة لتوسيع نطاق البحث)
 def fetch_news(query, country_filter, hours_back):
     end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(hours=hours_back)
     
-    # تنسيق الوقت لـ GDELT
     start_str = start_date.strftime("%Y%m%d%H%M%S")
     end_str = end_date.strftime("%Y%m%d%H%M%S")
     
-    # بناء استعلام البحث
+    # تحسين صيغة البحث وتخفيف القيود
     gdelt_query = query
     if country_filter == "US":
-        # للمصادر الأمريكية نستخدم قائمة من أشهر النطاقات
-        us_domains = "(domainis:nytimes.com OR domainis:washingtonpost.com OR domainis:cnn.com OR domainis:foxnews.com OR domainis:wsj.com OR domainis:bloomberg.com OR domainis:reuters.com OR domainis:apnews.com)"
-        gdelt_query = f"{query} {us_domains}"
+        # استخدام domain بدلاً من domainis لتوسيع فرص المطابقة
+        gdelt_query = f'{query} (domain:nytimes.com OR domain:washingtonpost.com OR domain:cnn.com OR domain:foxnews.com OR domain:wsj.com OR domain:bloomberg.com OR domain:reuters.com OR domain:apnews.com)'
     elif country_filter == "UK":
-        gdelt_query = f"{query} sourcecountry:UK"
+        gdelt_query = f'{query} sourcecountry:UK'
     elif country_filter == "IS":
-        gdelt_query = f"{query} sourcecountry:IS"
+        gdelt_query = f'{query} sourcecountry:IS'
 
     params = {
         "query": gdelt_query,
         "mode": "ArtList",
         "format": "json",
-        "maxrecords": 60,
+        "maxrecords": 100,  # زيادة عدد النتائج المستردة قبل الفلترة
         "sort": "DateDesc",
         "startdatetime": start_str,
         "enddatetime": end_str
     }
     
-    try:
-        url = "https://api.gdeltproject.org/api/v2/doc/doc"
-        response = requests.get(url, params=params, timeout=15)
-        if response.status_code == 200:
-            return response.json().get("articles", [])
-        return []
-    except Exception:
-        return []
+    # إضافة محاولات اتصال متعددة لتجنب السقوط المؤقت لسيرفرات GDELT
+    for _ in range(3):
+        try:
+            url = "https://api.gdeltproject.org/api/v2/doc/doc"
+            response = requests.get(url, params=params, timeout=10)
+            if response.status_code == 200:
+                return response.json().get("articles", [])
+        except Exception:
+            time.sleep(1)
+            continue
+    return []
 
 # 5. تصنيف نوع المقال
 def get_article_type(url):
@@ -123,7 +125,6 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
             st.write(f"🇮🇱 العبرية: {query_he}")
             
             # 2. بناء استعلام ذكي
-            # إذا كان البحث في إسرائيل، نضيف العبرية، غير ذلك نعتمد على الإنجليزية
             if country == "IS":
                 final_query = f'("{query_en}" OR "{query_he}")'
             else:
@@ -145,7 +146,7 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
 
         # ================= عرض النتائج =================
         if not filtered_articles:
-            st.info("لا توجد نتائج مطابقة لبحثك في هذا النطاق الزمني أو المصدر. حاول توسيع البحث.")
+            st.info("لا توجد نتائج مطابقة لبحثك في هذا النطاق الزمني أو المصدر. جرب اختيار 'الكل' في الفلاتر أو توسيع النطاق الزمني.")
         else:
             for art in filtered_articles:
                 orig_title = art.get("title", "بدون عنوان")
@@ -156,10 +157,10 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
                 # ترجمة العنوان للعربية للعرض
                 title_ar = translate_text(orig_title, "ar")
                 
-                # تنسيق التاريخ
+                # تنسيق التاريخ لتوقيت مصر
                 try:
                     dt = datetime.strptime(seen_date, "%Y%m%dT%H%M%SZ")
-                    dt_cairo = dt.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Africa/Cairo")) if "ZoneInfo" in globals() else dt + timedelta(hours=3)
+                    dt_cairo = dt.replace(tzinfo=timezone.utc) + timedelta(hours=3)
                     date_str = dt_cairo.strftime("%Y-%m-%d %H:%M")
                 except:
                     date_str = seen_date
@@ -181,9 +182,7 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
                     # أزرار الإجراءات
                     c1, c2 = st.columns(2)
                     with c1:
-                        # فتح المقال الأصلي
                         st.link_button("🔗 المصدر الأصلي", url, use_container_width=True)
                     with c2:
-                        # ترجمة صفحة المقال بالكامل باستخدام مترجم جوجل للويب
                         translate_url = f"https://translate.google.com/translate?sl=auto&tl=ar&u={quote(url, safe='')}"
                         st.link_button("🌐 ترجم المقال (صفحة كاملة)", translate_url, use_container_width=True)
