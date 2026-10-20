@@ -1,2 +1,4 @@
 streamlit
 requests
+newspaper3k
+lxml[html_clean]
