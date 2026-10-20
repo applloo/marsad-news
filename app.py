@@ -32,8 +32,7 @@ COUNTRY_MAP = {
     "OM": "عُمان 🇴🇲", "BH": "البحرين 🇧🇭", "YE": "اليمن 🇾🇪",
     "TR": "تركيا 🇹🇷", "IR": "إيران 🇮🇷", "FR": "فرنسا 🇫🇷",
     "DE": "ألمانيا 🇩🇪", "RU": "روسيا 🇷🇺", "CN": "الصين 🇨🇳",
-    "IN": "الهند 🇮🇳", "PK": "باكستان 🇵🇰", "AF": "أفغانستان 🇦🇫",
-    "PS": "فلسطين 🇵🇸", "LY": "ليبيا 🇱🇾", "SD": "السودان 🇸🇩"
+    "IN": "الهند 🇮🇳", "PS": "فلسطين 🇵🇸", "LY": "ليبيا 🇱🇾", "SD": "السودان 🇸🇩"
 }
 
 SOURCE_MAP = {
@@ -46,9 +45,7 @@ SOURCE_MAP = {
     "skynewsarabia.com": "سكاي نيوز عربية", "thegazette.com": "ذا جازيت",
     "kitabat.com": "كتابات", "haaretz.com": "هآرتس",
     "ynet.co.il": "واي نت (Ynet)", "jpost.com": "جيروزاليم بوست",
-    "timesofisrael.com": "تايمز أوف إسرائيل", "axios.com": "أكسيوس",
-    "nbcnews.com": "إن بي سي (NBC)", "cbsnews.com": "سي بي إس (CBS)",
-    "abcnews.go.com": "إيه بي سي (ABC)", "usatoday.com": "يو إس إيه توداي"
+    "timesofisrael.com": "تايمز أوف إسرائيل", "axios.com": "أكسيوس"
 }
 
 def get_country_ar(code):
@@ -61,7 +58,11 @@ def get_source_ar(domain):
     name = d.split(".")[0].capitalize()
     return f"صحيفة {name}"
 
-# 3. دوال الترجمة (محسنة)
+# دالة لتنظيف النصوص من التشكيل (الذي يمنع محركات البحث من إيجاد الكلمات)
+def clean_text(text):
+    return re.sub(r'[\u0591-\u05C7\u064B-\u065F]', '', text)
+
+# 3. دوال الترجمة 
 @st.cache_data(ttl=3600, show_spinner=False)
 def translate_text(text, target_lang):
     text = text.strip()
@@ -71,7 +72,8 @@ def translate_text(text, target_lang):
         params = {"client": "gtx", "sl": "ar", "tl": target_lang, "dt": "t", "q": text}
         res = requests.get(url, params=params, timeout=5)
         if res.status_code == 200:
-            return "".join([sentence[0] for sentence in res.json()[0] if sentence[0]]).replace('"', '')
+            translated = "".join([sentence[0] for sentence in res.json()[0] if sentence[0]]).replace('"', '')
+            return clean_text(translated) # إزالة التشكيل فور الترجمة
         return text
     except Exception:
         return text
@@ -153,31 +155,24 @@ if st.button("ابحث الآن", use_container_width=True, type="primary"):
         st.warning("الرجاء إدخال كلمة بحث أولاً.")
     else:
         with st.status("جاري معالجة طلبك...", expanded=True) as status:
-            # 1. تفكيك الكلمات عبر الفاصلة العربية أو الإنجليزية
+            # 1. تفكيك الكلمات
             raw_terms = re.split(r'[،,]', search_query)
             terms = [t.strip() for t in raw_terms if t.strip()]
             
-            st.write("🔄 جاري تفكيك وترجمة مصطلحات البحث...")
+            st.write("🔄 جاري تفكيك وترجمة وتنظيف مصطلحات البحث...")
             
-            en_terms = []
-            he_terms = []
+            query_parts = []
             
             for t in terms:
                 en = translate_text(t, "en")
                 he = translate_text(t, "iw")
-                en_terms.append(f'"{en}"') # وضع الكلمة بين علامتي تنصيص لضمان دقة GDELT
-                he_terms.append(f'"{he}"')
                 st.write(f"▪️ **{t}** ➡️ 🇬🇧 {en} | 🇮🇱 {he}")
+                # بناء كتلة بحث ذكية تبحث عن الكلمة بالإنجليزية أو العبرية
+                query_parts.append(f'("{en}" OR "{he}")')
             
-            # 2. بناء استعلام ذكي مدمج
+            # 2. بناء استعلام مدمج
             logic_operator = " OR " if "(OR)" in join_logic else " AND "
-            en_query = logic_operator.join(en_terms)
-            he_query = logic_operator.join(he_terms)
-            
-            if country == "IS":
-                final_query = f"({en_query}) OR ({he_query})"
-            else:
-                final_query = f"{en_query}"
+            final_query = logic_operator.join(query_parts)
                 
             # 3. جلب الأخبار
             st.write("📡 جاري جلب الأخبار من قواعد البيانات المباشرة...")
