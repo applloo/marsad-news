@@ -1,4 +1,5 @@
 streamlit
 requests
-newspaper3k
+deep-translator
+trafilatura
 lxml[html_clean]
