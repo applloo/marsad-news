@@ -1,5 +1,0 @@
-streamlit
-requests
-deep-translator
-trafilatura
-lxml[html_clean]
