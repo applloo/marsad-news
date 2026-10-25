@@ -13,6 +13,7 @@ import streamlit as st
 import core
 from core import fmt_seen, tr
 from sources import ISRAEL, UK, USA
+from writers import WRITER_GROUPS, WRITERS
 
 DOMAIN_LABELS = {}
 for _g in (ISRAEL, USA, UK):
@@ -245,6 +246,14 @@ def render_results(key):
                 f"<div class='ar-title'>{html.escape(a.get('title_ar', ''))}</div>"
                 f"<div class='ltr' dir='ltr'>{orig}</div>{en_line}"
                 f"<div class='meta'>🕒 {fmt_seen(a.get('seendate', ''))} (القاهرة)<br>"
+                + (
+                    f"✍️ الكاتب: <b>{html.escape(a['writer'])}</b> — {html.escape(a.get('outlet', ''))} "
+                    + ("· 📌 من صفحة الكاتب" if a.get("wsrc") == "feed" else "· 🔎 بحث باسم الكاتب")
+                    + "<br>"
+                    if a.get("writer")
+                    else ""
+                )
+                +
                 f"🌐 المصدر: {src} · 🏳️ الدولة: {html.escape(a.get('country_ar', '') or a.get('sourcecountry', ''))}"
                 f" · <span class='badge'>{html.escape(ctag)}</span></div>"
                 f"<a class='btn' href='{html.escape(link)}' target='_blank' rel='noopener'>ترجم المقال</a>",
@@ -267,8 +276,8 @@ def render_results(key):
                 st.info(data["summaries"][url])
 
 
-tab_ml, tab_il, tab_us, tab_uk, tab_gd = st.tabs(
-    ["🔤 ترجمة ثم بحث", "🇮🇱 إسرائيلية (عبري)", "🇺🇸 أمريكية", "🇬🇧 بريطانية", "🌐 بحث عام GDELT"]
+tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_gd = st.tabs(
+    ["✍️ كتّاب ومحللون", "🔤 ترجمة ثم بحث", "🇮🇱 إسرائيلية (عبري)", "🇺🇸 أمريكية", "🇬🇧 بريطانية", "🌐 بحث عام GDELT"]
 )
 
 with tab_il:
@@ -299,7 +308,7 @@ with tab_gd:
         do_search("gd", core.GLOBAL_SCOPES[scope])
     render_results("gd")
 
-COUNTRIES = {"كل الدول": None, "الولايات المتحدة": "US", "بريطانيا": "UK", "إسرائيل": "IS"}
+COUNTRIES = {"كل الدول": None, "الولايات المتحدة": "US", "بريطانيا": "UK", "إسرائيل": "IS", "البرازيل": "BR", "البرتغال": "PO", "فرنسا": "FR", "إسبانيا": "SP"}
 
 with tab_ml:
     st.caption(
@@ -343,3 +352,58 @@ with tab_ml:
         else:
             do_search("ml", jobs, None, terms=base_terms or ["x"], pre=True)
     render_results("ml")
+
+DAY_OPTS = {"آخر 24 ساعة": 1, "آخر 3 أيام": 3, "آخر 7 أيام": 7, "آخر 14 يوماً": 14, "آخر 30 يوماً": 30}
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def cached_writers(ids, days):
+    ws = [w for w in WRITERS if w["id"] in ids]
+    items, notes = core.fetch_writers(ws, days)
+    return core.translate_titles(items), notes
+
+
+with tab_wr:
+    st.caption(
+        "أحدث مقالات الرأي والتحليل لكتّاب ومراسلين مهتمين بالشرق الأوسط، بعناوين مترجمة، وزر «ترجم المقال» لقراءة النص مترجماً. "
+        "النتائج تُحفظ نصف ساعة، فالفتح المتكرر سريع."
+    )
+    days_label = st.selectbox("الفترة", list(DAY_OPTS.keys()), index=2, key="wr_days")
+    sel_ids = []
+    for gname, ws_ in WRITER_GROUPS.items():
+        label_to_id = {f"{w['name_ar']} — {w['outlet']}": w["id"] for w in ws_}
+        picked = st.multiselect(
+            gname, list(label_to_id), default=[l for l, i in label_to_id.items() if next(w for w in ws_ if w["id"] == i)["default"]],
+            key=f"wr_{gname}",
+        )
+        sel_ids += [label_to_id[p] for p in picked]
+    use_ctype = st.checkbox("طبّق فلتر «نوع المحتوى» أعلاه", value=False, key="wr_ct")
+    use_kw = st.checkbox("اقتصر على المقالات التي تذكر كلمات البحث أعلاه (يفحص النص — أبطأ)", value=False, key="wr_kw")
+    if st.button("اعرض أحدث مقالاتهم", type="primary", use_container_width=True, key="go_wr"):
+        if not sel_ids:
+            st.warning("اختر كاتباً واحداً على الأقل.")
+        else:
+            with st.spinner("جارٍ جلب المقالات وترجمة العناوين…"):
+                items, notes = cached_writers(tuple(sorted(sel_ids)), DAY_OPTS[days_label])
+                items = [dict(a) for a in items]
+            kw_terms = [t_.strip() for t_ in re.split(r"[,،;\n]+", query) if t_.strip()]
+            if use_ctype and ctype != "الكل":
+                items = [a for a in items if a.get("ctype") == ctype]
+            matchers = []
+            if use_kw and kw_terms and items:
+                with st.spinner("جارٍ فحص نصوص المقالات…"):
+                    matchers = core.make_matchers(kw_terms, ["en", "iw"])
+                    core.enrich_items(items, matchers, joiner, limit=60)
+                    items = [a for a in items if not (a.get("fetched") and not a.get("found"))]
+            counts = {}
+            for a in items:
+                counts[a["writer"]] = counts.get(a["writer"], 0) + 1
+            chosen = [w["name_ar"] for w in WRITERS if w["id"] in sel_ids]
+            hl = sorted({s_ for alts in matchers for stems in alts for s_ in stems}, key=len, reverse=True)
+            st.session_state["res_wr"] = {
+                "items": items, "errors": [] if items else ["لم يُعثر على مقالات — راجع «الاستعلام المُرسل فعلياً» لمعرفة ما جُرّب."],
+                "used": notes, "summaries": {}, "counts": counts,
+                "silent": [n for n in chosen if n not in counts], "hidden": 0, "hl": hl,
+            }
+    st.caption("ℹ️ مواقع مثل نيويورك تايمز وواشنطن بوست وفاينانشال تايمز وهآرتس مدفوعة: يظهر عنوانها مترجماً، وقد يتعذّر عرض نصها الكامل.")
+    render_results("wr")
