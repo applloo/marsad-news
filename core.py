@@ -1,18 +1,22 @@
 # -*- coding: utf-8 -*-
 """منطق البحث والترجمة (بدون Streamlit) - يعتمد على GDELT DOC 2.0 API"""
+import base64
+import email.utils
 import ipaddress
 import json
 import re
 import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
-import requests
+import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
+
+import requests
 
 try:  # اختياري: إن لم تتوفر الحزمة يعمل مستخرج بديل مدمج
     import trafilatura
@@ -585,6 +589,191 @@ def enrich_items(items, matchers, joiner="AND", limit=40, workers=8):
     with ThreadPoolExecutor(workers) as ex:
         list(ex.map(work, head))
     return items
+
+
+# ───────────────────────── كتّاب ومحللون (RSS + أخبار Google) ─────────────────────────
+
+_DC = "{http://purl.org/dc/elements/1.1/}"
+_ATOM = "{http://www.w3.org/2005/Atom}"
+COUNTRY_EN = {"US": "United States", "UK": "United Kingdom", "IL": "Israel"}
+
+
+def _to_utc(s):
+    if not s:
+        return None
+    s = s.strip()
+    try:
+        dt = email.utils.parsedate_to_datetime(s)
+    except Exception:
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def parse_feed(content):
+    root = ET.fromstring(content)
+    out = []
+    for it in root.iter("item"):
+        src = it.find("source")
+        out.append(
+            {
+                "title": (it.findtext("title") or "").strip(),
+                "link": (it.findtext("link") or "").strip(),
+                "date": _to_utc(it.findtext("pubDate") or it.findtext(_DC + "date")),
+                "source_url": (src.get("url") or "") if src is not None else "",
+                "source_name": ((src.text or "").strip()) if src is not None else "",
+            }
+        )
+    for en in root.iter(_ATOM + "entry"):
+        ln = en.find(_ATOM + "link")
+        out.append(
+            {
+                "title": (en.findtext(_ATOM + "title") or "").strip(),
+                "link": (ln.get("href") if ln is not None else "") or "",
+                "date": _to_utc(en.findtext(_ATOM + "published") or en.findtext(_ATOM + "updated")),
+                "source_url": "",
+                "source_name": "",
+            }
+        )
+    return out
+
+
+def _get_feed(url):
+    r = requests.get(url, headers=UA, timeout=20)
+    r.raise_for_status()
+    if len(r.content) > 5_000_000:
+        raise ValueError("الخلاصة كبيرة جداً")
+    return parse_feed(r.content)
+
+
+def gnews_url(q, hl, gl, ceid):
+    return f"https://news.google.com/rss/search?q={quote(q)}&hl={hl}&gl={gl}&ceid={quote(ceid)}"
+
+
+def decode_gnews(url):
+    """يفك رابط أخبار Google إلى الرابط الأصلي (أفضل جهد؛ يعيد الرابط كما هو عند الفشل)"""
+    try:
+        p = urlparse(url)
+        if p.netloc != "news.google.com":
+            return url
+        gid = p.path.rstrip("/").split("/")[-1]
+        raw = base64.urlsafe_b64decode(gid + "=" * (-len(gid) % 4))
+        if raw.startswith(b"\x08\x13\x22"):
+            raw = raw[3:]
+            if raw.endswith(b"\xd2\x01\x00"):
+                raw = raw[:-3]
+            n, start = raw[0], 1
+            if n >= 0x80:
+                n, start = (n & 0x7F) | (raw[1] << 7), 2
+            direct = raw[start : start + n].decode("utf-8", "ignore")
+            if direct.startswith("http"):
+                return direct
+        page = ""
+        for base in ("https://news.google.com/rss/articles/", "https://news.google.com/articles/"):
+            page = requests.get(base + gid, headers=UA, timeout=15).text
+            sg = re.search(r'data-n-a-sg="([^"]+)"', page)
+            ts = re.search(r'data-n-a-ts="([^"]+)"', page)
+            if sg and ts:
+                break
+        else:
+            return url
+        inner = (
+            '["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],'
+            f'"X","X",1,[1,1,1],1,1,null,0,0,null,0],"{gid}",{ts.group(1)},"{sg.group(1)}"]'
+        )
+        payload = "f.req=" + quote(json.dumps([[["Fbv4je", inner]]]))
+        r = requests.post(
+            "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+            headers={"content-type": "application/x-www-form-urlencoded;charset=UTF-8", "user-agent": UA["User-Agent"]},
+            data=payload,
+            timeout=15,
+        )
+        parsed = json.loads(r.text.split("\n\n")[1])[:-2]
+        out = json.loads(parsed[0][2])[1]
+        return out if str(out).startswith("http") else url
+    except Exception:
+        return url
+
+
+def _host(u):
+    h = (urlparse(u).hostname or "").lower()
+    return h[4:] if h.startswith("www.") else h
+
+
+def fetch_writer(w, days):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    items, notes = [], []
+
+    def add(e, how, lang):
+        if not e["link"] or not e["title"] or not e["date"] or e["date"] < cutoff:
+            return
+        title = e["title"]
+        if e["source_name"] and title.endswith(" - " + e["source_name"]):
+            title = title[: -len(e["source_name"]) - 3]
+        items.append(
+            {
+                "url": e["link"], "title": title, "seendate": e["date"].strftime("%Y%m%dT%H%M%SZ"),
+                "domain": _host(e["source_url"]) or _host(e["link"]),
+                "sourcecountry": COUNTRY_EN.get(w["country"], ""), "language": lang,
+                "writer": w["name_ar"], "writer_en": w["name_en"], "outlet": w["outlet"], "wsrc": how,
+            }
+        )
+
+    for f in w["feeds"]:
+        try:
+            got = _get_feed(f)
+            before = len(items)
+            for e in got:
+                add(e, "feed", "English")
+            notes.append(f"{w['name_en']} ⟵ صفحة الكاتب: {len(items) - before} مقال")
+        except Exception as ex:
+            notes.append(f"{w['name_en']} ⟵ صفحة الكاتب تعذّر جلبها ({type(ex).__name__})")
+    for g in w["gn"]:
+        q = g["q"] + f" when:{max(1, days)}d"
+        try:
+            got = _get_feed(gnews_url(q, g["hl"], g["gl"], g["ceid"]))
+            before = len(items)
+            for e in got:
+                add(e, "search", g["lang"])
+            notes.append(f"{w['name_en']} ⟵ بحث: {q[:110]} ⟵ {len(items) - before}")
+        except Exception as ex:
+            notes.append(f"{w['name_en']} ⟵ البحث تعذّر ({type(ex).__name__})")
+    return items, notes
+
+
+def fetch_writers(writers, days, workers=6):
+    all_items, notes = [], []
+    with ThreadPoolExecutor(workers) as ex:
+        for items, nt in ex.map(lambda w: fetch_writer(w, days), writers):
+            all_items += items
+            notes += nt
+    seen, uniq = set(), []
+    for a in sorted(all_items, key=lambda a: (a["wsrc"] != "feed", a["seendate"]), reverse=False):
+        key = (a["writer"], re.sub(r"\W+", "", a["title"].lower())[:80])
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(a)
+
+    def dec(a):
+        if "news.google.com" in a["url"]:
+            real = decode_gnews(a["url"])
+            if real != a["url"]:
+                a["url"], a["domain"] = real, _host(real)
+        return a
+
+    with ThreadPoolExecutor(workers) as ex:
+        list(ex.map(dec, uniq[:120]))
+    for a in uniq:
+        kind = next((w["kind"] for w in writers if w["name_ar"] == a["writer"]), "رأي")
+        ct, sure = classify(a["url"], a["title"])
+        a["ctype"], a["ctype_sure"] = (ct, True) if sure else (kind, False)
+    uniq.sort(key=lambda a: a["seendate"], reverse=True)
+    return uniq, notes
 
 
 # ───────────────────────── التلخيص ─────────────────────────
