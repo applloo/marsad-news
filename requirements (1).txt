@@ -1,4 +1,0 @@
-streamlit>=1.40
-requests
-deep-translator
-trafilatura
