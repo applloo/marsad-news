@@ -271,7 +271,8 @@ def _try_code(code):
     if not k:
         return why
     st.session_state["auth"] = {"role": "guest", "token": keys_mod.norm(code), "label": k.get("label", ""),
-                                "exp": keys_mod.iso(keys_mod.expires_at(k)), "checked": time.time()}
+                                "exp": keys_mod.iso(keys_mod.expires_at(k)), "checked": time.time(),
+                                "scope": k.get("scope", "full")}
     return ""
 
 
@@ -501,6 +502,61 @@ if not IS_ADMIN:
     st.info(f"🎟️ نسخة تجريبية لـ «{_a.get('label', '')}» — "
             f"تنتهي {keys_mod.parse(_a['exp']).astimezone(core.TZ).strftime('%Y-%m-%d %H:%M')} بتوقيت القاهرة. "
             "لا يُحفظ شيء بعد إغلاق الصفحة.")
+
+
+def render_daily():
+    st.caption("نشرة تُولَّد تلقائياً كل صباح (نحو 6 بتوقيت القاهرة) لكل ملف، من عناوين عشرات المصادر العالمية والعربية، "
+               "مع ما يخص مصر. ترتيب وتجميع للعناوين نفسها (بلا ذكاء اصطناعي)، وليس حكماً على صحة الأخبار.")
+    if not (_GT and _GG):
+        st.info("التقرير اليومي يحتاج التخزين الدائم (GITHUB_TOKEN وGIST_ID).")
+        return
+    if "reports" not in st.session_state or time.time() - st.session_state.get("reports_t", 0) > 600:
+        try:
+            st.session_state["reports"] = store.load_reports(_GT, _GG)
+        except Exception as e:
+            st.error(f"تعذّر تحميل التقارير ({type(e).__name__}).")
+            return
+        st.session_state["reports_t"] = time.time()
+    rp = st.session_state["reports"]
+    days = sorted((rp.get("archive") or {}).keys(), reverse=True)
+    if not days:
+        st.info("لا يوجد تقرير بعد. شغّل خطوة «التقرير اليومي» من GitHub Actions أول مرة (راجع README)، وبعدها يتجدد وحده كل صباح.")
+        return
+    day = st.selectbox("التاريخ", days, key="dr_day")
+    rep = rp["archive"][day]
+    gen = keys_mod.parse(rep.get("generated"))
+    if gen:
+        st.caption(f"آخر تحديث: {gen.astimezone(core.TZ).strftime('%Y-%m-%d %H:%M')} بتوقيت القاهرة")
+    names = list(rep["files"].keys())
+    pick_ = st.radio("الملف", (["📌 نشرة اليوم"] if rep.get("overview") else []) + names, horizontal=True, key="dr_file")
+    if pick_.startswith("📌"):
+        st.markdown(rep["overview"])
+        return
+    f = rep["files"][pick_]
+    st.caption(f"عدد العناوين التي فُحصت: {f.get('total', '—')} · منها يخص مصر: {f.get('egypt', '—')}")
+    if f.get("brief"):
+        st.markdown(f["brief"])
+    elif f.get("error"):
+        st.warning("تعذّر توليد هذا الملف اليوم.")
+    else:
+        st.info("لا ملخص لهذا الملف (العناوين أدناه).")
+    shown = f.get("items", [])
+    if not shown:
+        return
+    only_eg = st.checkbox("🇪🇬 المتعلق بمصر فقط", value=False, key="dr_eg")
+    with st.expander(f"📋 العناوين ({len(shown)})", expanded=not f.get("brief")):
+        for a in shown:
+            if only_eg and not a.get("egypt"):
+                continue
+            lnk = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a['title'][:200], safe='')}{auth_qs()}"
+            st.markdown(f"- {'🇪🇬 ' if a.get('egypt') else ''}**{a['title_ar']}** — {source_name(a['domain'])} · {a['ctype']} · "
+                        f"{intel.SIDES.get(a['side'], '')}  \n  [ترجم المقال]({lnk}) · [الأصل]({a['url']})")
+
+
+if not IS_ADMIN and st.session_state["auth"].get("scope") == "reports":
+    render_daily()  # اشتراك «تقرير فقط»: لا يرى بقية التطبيق
+    st.stop()
+
 st.caption("اكتب بالعربية كلمة أو عدة كلمات أو جملة مركّبة — تُترجم تلقائياً إلى العبرية والإنجليزية وتُترجم النتائج للعربية.")
 
 query = st.text_input(
@@ -730,8 +786,8 @@ def render_results(key):
                 st.button("💾 حفظ للقراءة لاحقاً", key=f"save_{key}_{i}", on_click=save_item, args=(a, key))
 
 
-tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_sv, tab_ms = st.tabs(
-    ["✍️ كتّاب ومحللون", "🔤 ترجمة ثم بحث", "🇮🇱 إسرائيلية (عبري)", "🇺🇸 أمريكية", "🇬🇧 بريطانية", "🌍 تركيا وإيران وإثيوبيا", "🗞️ تصفّح مصدر", "🛰️ مكتب الاستخبارات", "🌐 بحث عام GDELT",
+tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_sv, tab_ms = st.tabs(
+    ["📰 التقرير اليومي", "✍️ كتّاب ومحللون", "🔤 ترجمة ثم بحث", "🇮🇱 إسرائيلية (عبري)", "🇺🇸 أمريكية", "🇬🇧 بريطانية", "🌍 تركيا وإيران وإثيوبيا", "🗞️ تصفّح مصدر", "🛰️ مكتب الاستخبارات", "🌐 بحث عام GDELT",
      "📌 المحفوظات", "⚙️ مصادري"]
 )
 
@@ -1386,10 +1442,11 @@ def render_keys_admin():
     label = c1.text_input("اسم الشخص / الجهة (لتعرف لمن أعطيتها)", key="k_label")
     durs = {"6 ساعات": 6, "يوم": 24, "3 أيام": 72, "أسبوع": 168, "أسبوعان": 336, "شهر": 720, "مدة أخرى (بالساعات)": 0}
     dur = c2.selectbox("مدة التجربة (تبدأ من أول فتح)", list(durs), index=3, key="k_dur")
+    scope_lbl = c1.selectbox("الصلاحية", ["كاملة (كل التطبيق)", "تقرير يومي فقط (اشتراك)"], key="k_scope")
     hours = durs[dur] or st.number_input("عدد الساعات", min_value=1, max_value=24 * 365, value=48, key="k_hours")
     if st.button("➕ ولّد شفرة جديدة", type="primary", key="k_new"):
         try:
-            _, k = keys_mod.mutate(_GT, _GG, lambda ks: keys_mod.create(ks, label, hours))
+            _, k = keys_mod.mutate(_GT, _GG, lambda ks: keys_mod.create(ks, label, hours, "reports" if scope_lbl.startswith("تقرير") else "full"))
             st.session_state["k_last"] = k["code"]
         except Exception as e:
             st.error(f"تعذّر الحفظ ({type(e).__name__}).")
@@ -1410,7 +1467,7 @@ def render_keys_admin():
             seen = keys_mod.parse(k.get("last_seen"))
             seen_txt = seen.astimezone(core.TZ).strftime("%m-%d %H:%M") if seen else "—"
             st.markdown(f"**{k.get('label', '')}** — {icons.get(stt, stt)} — {keys_mod.human_left(k)}  \n"
-                        f"فتحها {k.get('visits', 0)} مرة · آخر دخول: {seen_txt} (القاهرة) · المدة: {int(k.get('hours', 0))} ساعة")
+                        f"{'📰 تقرير فقط' if k.get('scope') == 'reports' else 'صلاحية كاملة'} · فتحها {k.get('visits', 0)} مرة · آخر دخول: {seen_txt} (القاهرة) · المدة: {int(k.get('hours', 0))} ساعة")
             st.code(link(k["code"]), language=None)
             b1, b2 = st.columns(2)
             if stt in ("active", "unused") and b1.button("⛔ إلغاء الآن", key=f"krv_{k['code']}"):
@@ -1421,6 +1478,9 @@ def render_keys_admin():
                 st.rerun()
     st.caption("ملاحظة: الضيف لا يرى محفوظاتك ولا مصادرك المضافة، وما يحفظه يزول بإغلاق الصفحة. الإلغاء يسري خلال ~10 دقائق على من هو داخل التطبيق.")
 
+
+with tab_dr:
+    render_daily()
 
 with tab_sv:
     render_saved()
