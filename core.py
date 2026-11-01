@@ -59,22 +59,80 @@ def _gtx(text, src, dest):
     return "".join(seg[0] for seg in r.json()[0] if seg and seg[0])
 
 
-_MM_CODE = {"iw": "he", "zh": "zh-CN"}
-
-
-def _mymemory(text, src, dest):
-    """محرك احتياطي ثالث (MyMemory) عند حجب أو فشل ترجمة جوجل"""
-    if src == "auto":
-        src = "ar" if _HAS_AR.search(text) else ("he" if re.search(r"[\u0590-\u05FF]", text) else "en")
-    r = requests.get("https://api.mymemory.translated.net/get",
-                     params={"q": text[:480], "langpair": f"{_MM_CODE.get(src, src)}|{_MM_CODE.get(dest, dest)}"},
-                     headers=UA, timeout=20)
+def _gtx_alt(text, src, dest):
+    """مسار ثانٍ لترجمة جوجل (واجهة إضافة المتصفح) عند تعذّر المسار الأول"""
+    r = requests.get("https://clients5.google.com/translate_a/t",
+                     params={"client": "dict-chrome-ex", "sl": src, "tl": dest, "q": text}, headers=UA, timeout=20)
     r.raise_for_status()
     j = r.json()
-    out = (j.get("responseData") or {}).get("translatedText", "") or ""
-    if str(j.get("responseStatus")) != "200" or "MYMEMORY WARNING" in out.upper():
-        raise ValueError("MyMemory refused")
-    return out
+    if isinstance(j, dict):
+        return "".join(s.get("trans", "") for s in j.get("sentences", []))
+    return j[0] if isinstance(j[0], str) else j[0][0]
+
+
+def _gtx_mobile(text, src, dest):
+    """مسار ثالث: صفحة جوجل للموبايل (HTML)"""
+    r = requests.get("https://translate.google.com/m", params={"sl": src, "tl": dest, "q": text}, headers=UA, timeout=20)
+    r.raise_for_status()
+    m = re.search(r'class="result-container">(.*?)</div>', r.text, re.S)
+    if not m:
+        raise ValueError("no result")
+    return _html.unescape(m.group(1)).strip()
+
+
+# قاموس مدمج للمصطلحات الإقليمية الأساسية: لا يعتمد على أي إنترنت، ويضمن ترجمة صحيحة لها (عبري/إنجليزي/تركي/فارسي/أمهري)
+_GLOSS = {
+    "اثيوبيا": {"iw": "אתיופיה", "en": "Ethiopia", "tr": "Etiyopya", "fa": "اتیوپی", "am": "ኢትዮጵያ"},
+    "مصر": {"iw": "מצרים", "en": "Egypt", "tr": "Mısır", "fa": "مصر", "am": "ግብፅ"},
+    "السودان": {"iw": "סודאן", "en": "Sudan", "tr": "Sudan", "fa": "سودان", "am": "ሱዳን"},
+    "ليبيا": {"iw": "לוב", "en": "Libya", "tr": "Libya", "fa": "لیبی", "am": "ሊቢያ"},
+    "اريتريا": {"iw": "אריתריאה", "en": "Eritrea", "tr": "Eritre", "fa": "اریتره", "am": "ኤርትራ"},
+    "الصومال": {"iw": "סומליה", "en": "Somalia", "tr": "Somali", "fa": "سومالی", "am": "ሶማሊያ"},
+    "اسرائيل": {"iw": "ישראל", "en": "Israel", "tr": "İsrail", "fa": "اسرائیل", "am": "እስራኤል"},
+    "تركيا": {"iw": "טורקיה", "en": "Turkey", "tr": "Türkiye", "fa": "ترکیه", "am": "ቱርክ"},
+    "ايران": {"iw": "איראן", "en": "Iran", "tr": "İran", "fa": "ایران", "am": "ኢራን"},
+    "روسيا": {"iw": "רוסיה", "en": "Russia", "tr": "Rusya", "fa": "روسیه", "am": "ሩሲያ"},
+    "الصين": {"iw": "סין", "en": "China", "tr": "Çin", "fa": "چین", "am": "ቻይና"},
+    "غزة": {"iw": "עזה", "en": "Gaza", "tr": "Gazze", "fa": "غزه", "am": "ጋዛ"},
+    "اليمن": {"iw": "תימן", "en": "Yemen", "tr": "Yemen", "fa": "یمن", "am": "የመን"},
+    "سد النهضه": {"iw": "סכר התחייה", "en": "Renaissance Dam", "tr": "Rönesans Barajı", "fa": "سد رنسانس", "am": "የህዳሴ ግድብ"},
+    "الجيش المصري": {"iw": "הצבא המצרי", "en": "Egyptian army", "tr": "Mısır ordusu", "fa": "ارتش مصر", "am": "የግብፅ ጦር"},
+    "البحر الاحمر": {"iw": "הים האדום", "en": "Red Sea", "tr": "Kızıldeniz", "fa": "دریای سرخ", "am": "ቀይ ባህር"},
+    "باب المندب": {"iw": "באב אל-מנדב", "en": "Bab el-Mandeb", "tr": "Babülmendep", "fa": "باب المندب", "am": "ባብ ኤል ማንዴብ"},
+    "قناه السويس": {"iw": "תעלת סואץ", "en": "Suez Canal", "tr": "Süveyş Kanalı", "fa": "کانال سوئز", "am": "የሱዌዝ ካናል"},
+    "سلاح": {"iw": "נשק", "en": "weapons", "tr": "silah", "fa": "سلاح", "am": "የጦር መሳሪያ"},
+    "اسلحه": {"iw": "נשק", "en": "weapons", "tr": "silah", "fa": "سلاح", "am": "የጦር መሳሪያ"},
+    "تسليح": {"iw": "חימוש", "en": "armament", "tr": "silahlanma", "fa": "تسلیحات", "am": "ትጥቅ"},
+    "طائرات": {"iw": "מטוסים", "en": "aircraft", "tr": "uçak", "fa": "هواپیما", "am": "አውሮፕላኖች"},
+    "مقاتلات": {"iw": "מטוסי קרב", "en": "fighter jets", "tr": "savaş uçağı", "fa": "جنگنده", "am": "ተዋጊ ጄቶች"},
+    "سوخوي": {"iw": "סוחוי", "en": "Sukhoi", "tr": "Sukhoi", "fa": "سوخو", "am": "Sukhoi"},
+    "طيارات": {"iw": "מטוסים", "en": "aircraft", "tr": "uçak", "fa": "هواپیما", "am": "አውሮፕላኖች"},
+}
+
+
+def _norm_ar(s):
+    s = re.sub(r"[\u064B-\u0652\u0640]", "", s or "")
+    s = re.sub(r"[أإآٱ]", "ا", s).replace("ى", "ي").replace("ة", "ه")
+    return " ".join(re.sub(r"[()\[\]{}\"“”«»،,.;:!?]", " ", s).split())
+
+
+def gloss_tr(text, dest):
+    """ترجمة من القاموس المدمج (العبارة كاملة أو كلمة كلمة بشرط أن تكون كلها معروفة)، وإلا None"""
+    d = {"he": "iw"}.get(dest, dest)
+    if d not in ("iw", "en", "tr", "fa", "am") or not _HAS_AR.search(text or ""):
+        return None
+    n = _norm_ar(text)
+    if n in _GLOSS:
+        return _GLOSS[n][d]
+    out = []
+    for w in n.split():
+        if w in _GLOSS:
+            out.append(_GLOSS[w][d])
+        elif w.isdigit() or re.fullmatch(r"[\w\-]+", w) and not _HAS_AR.search(w):
+            out.append(w)
+        else:
+            return None
+    return " ".join(out) if out else None
 
 
 def tr(text, src="auto", dest="ar"):
@@ -87,11 +145,16 @@ def tr(text, src="auto", dest="ar"):
     key = (text, src, dest)
     if key in _TR_CACHE:
         return _TR_CACHE[key]
+    if src in ("auto", "ar"):
+        g = gloss_tr(text, dest)
+        if g:
+            return g
     for attempt in range(3):
         for fn in (
             (lambda: GoogleTranslator(source=src, target=dest).translate(text)) if GoogleTranslator else None,
             lambda: _gtx(text, src, dest),
-            (lambda: _mymemory(text, src, dest)) if attempt >= 1 else None,
+            (lambda: _gtx_alt(text, src, dest)) if attempt >= 1 else None,
+            (lambda: _gtx_mobile(text, src, dest)) if attempt >= 2 else None,
         ):
             if fn is None:
                 continue
