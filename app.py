@@ -22,17 +22,15 @@ import keys as keys_mod
 import store
 import time
 import writers as writers_mod
-from sources import ARABIC, EGYPT_ARABIC, FLAGS, ISRAEL, REGION, SECTIONS, UK, USA, source_country
+from sources import ARABIC, EGYPT_ARABIC, ISRAEL, REGION, SECTIONS, UK, USA
 from writers import WRITERS
 
 DOMAIN_LABELS = {}
-for _g in (ISRAEL, USA, UK, REGION, ARABIC):
+for _g in (ISRAEL, USA, UK, REGION):
     for _entries in _g.values():
         for _label, _doms, _ in _entries:
             for _d in _doms.split("|"):
-                DOMAIN_LABELS.setdefault(_d, _label)
-for _n, _d, *_rest in intel.SOURCES:
-    DOMAIN_LABELS.setdefault(_d, _n)
+                DOMAIN_LABELS[_d] = _label
 
 
 def source_name(domain):
@@ -41,29 +39,6 @@ def source_name(domain):
         if domain == d or domain.endswith("." + d):
             return label
     return domain
-
-
-@st.cache_data(ttl=7 * 86400, show_spinner=False)
-def _ar_name(label):
-    if re.search(r"[\u0600-\u06FF]", label):
-        return label
-    try:
-        return tr(label, "en", "ar") or label
-    except Exception:
-        return label
-
-
-def src_label(domain, with_domain=True):
-    """«اسم المصدر بالعربية · 🏳️ دولته» — يُستخدم في كل مكان يظهر فيه مصدر"""
-    dom = (domain or "").lower().replace("www.", "")
-    name = source_name(dom)
-    name_ar = _ar_name(name) if name != dom else dom
-    country = source_country(dom)
-    out = html.escape(name_ar)
-    if with_domain and name_ar != dom:
-        out += f" ({html.escape(dom)})"
-    out += f" · {FLAGS.get(country, '🏳️')} {country}" if country else " · 🏳️ دولة غير محددة"
-    return out
 
 
 st.set_page_config(page_title="رادار الأخبار العالمية", page_icon="📰", layout="centered")
@@ -183,7 +158,7 @@ def _alt_cards(items):
         st.markdown(
             f"<div class='card'><div class='ar-title'>{html.escape(a.get('title_ar', ''))}</div>"
             f"<div class='ltr' dir='ltr'>{html.escape(a['title'])}</div>"
-            f"<div class='meta'>🌐 {src_label(a['domain'])} · 🕒 {fmt_seen(a.get('seendate', ''))} · نص كامل ({a['chars']} حرف)</div>"
+            f"<div class='meta'>🌐 {html.escape(source_name(a['domain']))} ({html.escape(a['domain'])}) · 🕒 {fmt_seen(a.get('seendate', ''))} · نص كامل ({a['chars']} حرف)</div>"
             f"<a class='btn' href='{html.escape(lnk)}' target='_blank' rel='noopener'>ترجم المقال</a></div>",
             unsafe_allow_html=True,
         )
@@ -234,7 +209,6 @@ def reader_page():
         st.error("رابط غير صالح.")
         return
     st.markdown(f"🔗 **الرابط الأصلي:** [{html.escape(url)}]({url})")
-    st.markdown(f"<div class='meta'>🌐 المصدر: {src_label(core._host(url))}</div>", unsafe_allow_html=True)
 
     with st.spinner("جارٍ جلب المقال وترجمته…"):
         art = core.fetch_article(url)
@@ -641,7 +615,7 @@ def render_daily():
             if only_eg and not a.get("egypt"):
                 continue
             lnk = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a['title'][:200], safe='')}{auth_qs()}"
-            st.markdown(f"- {'🇪🇬 ' if a.get('egypt') else ''}**{a['title_ar']}** — {src_label(a['domain'])} · {a['ctype']} · "
+            st.markdown(f"- {'🇪🇬 ' if a.get('egypt') else ''}**{a['title_ar']}** — {source_name(a['domain'])} · {a['ctype']} · "
                         f"{intel.SIDES.get(a['side'], '')}  \n  [ترجم المقال]({lnk}) · [الأصل]({a['url']})"
                         + (f"  \n  🏷️ {'، '.join(a['ents'])}" if a.get("ents") else "")
                         + (f"  \n  > {a['snip_ar']}" if a.get("snip_ar") else ""))
@@ -720,12 +694,11 @@ def pick_sources(key, groups, allow_custom=True):
 
 
 def update_meta(data, sel):
-    counts, ctry = {}, {}
+    counts = {}
     for a in data["items"]:
         n = source_name(a.get("domain", ""))
         counts[n] = counts.get(n, 0) + 1
-        ctry[n] = source_country(a.get("domain", ""))
-    data["counts"], data["ctry"] = counts, ctry
+    data["counts"] = counts
     data["silent"] = [lbl for lbl, _, _ in (sel or []) if lbl not in counts]
 
 
@@ -797,7 +770,8 @@ def card_html(a):
     en = a.get("title_en", "")
     en_line = f"<div class='ltr' dir='ltr'>EN: {html.escape(en)}</div>" if en and en != a.get("title") else ""
     dom = a.get("domain", "")
-    src = src_label(dom)
+    sname = source_name(dom)
+    src = html.escape(sname) + (f" ({html.escape(dom)})" if sname != dom else "")
     ctag = a.get("ctype", "") + ("" if a.get("ctype_sure") else " (تقدير)")
     wline = (
         f"✍️ الكاتب: <b>{html.escape(a['writer'])}</b> — {html.escape(a.get('outlet', ''))} "
@@ -811,9 +785,8 @@ def card_html(a):
         f"<div class='ar-title'>{html.escape(a.get('title_ar', ''))}</div>"
         f"<div class='ltr' dir='ltr'>{orig}</div>{en_line}"
         f"<div class='meta'>🕒 {fmt_seen(a.get('seendate', ''))} (القاهرة)<br>{wline}"
-        f"🌐 المصدر: {src}"
-        + (f" · 🧭 {html.escape(a['country_ar'])}" if a.get("side") and a.get("country_ar") else "")
-        + f" · <span class='badge'>{html.escape(ctag)}</span></div>"
+        f"🌐 المصدر: {src} · 🏳️ الدولة: {html.escape(a.get('country_ar', '') or a.get('sourcecountry', ''))}"
+        f" · <span class='badge'>{html.escape(ctag)}</span></div>"
         f"<a class='btn' href='{html.escape(link)}' target='_blank' rel='noopener'>ترجم المقال</a>"
     )
 
@@ -849,7 +822,7 @@ def render_results(key):
             st.code(u, language=None)
     with st.expander("📊 توزيع النتائج على المصادر"):
         if data["counts"]:
-            st.markdown("  \n".join(f"- **{n}** ({FLAGS.get(data.get('ctry', {}).get(n, ''), '🏳️')} {data.get('ctry', {}).get(n, '') or 'غير محددة'}): {c}" for n, c in sorted(data["counts"].items(), key=lambda x: -x[1])))
+            st.markdown("  \n".join(f"- **{n}**: {c}" for n, c in sorted(data["counts"].items(), key=lambda x: -x[1])))
         if data["silent"]:
             st.markdown("**مصادر مختارة لم تُرجع نتائج:** " + "، ".join(data["silent"]))
             st.caption("غياب مصدر يعني أن GDELT لم يرصد له مقالات مطابقة في هذه الفترة، وليس أنه غير مدعوم في التطبيق.")
@@ -1164,7 +1137,7 @@ def intel_matrix(view):
             sub = [a for a in eg_items if a.get("side") == code][:6]
             if sub:
                 st.markdown(f"*{name}*")
-                st.markdown("\n".join(f"- [{a.get('title_ar', '')}]({a['url']}) — {src_label(a['domain'])}" for a in sub))
+                st.markdown("\n".join(f"- [{a.get('title_ar', '')}]({a['url']}) — {source_name(a['domain'])}" for a in sub))
     else:
         st.caption("لا توجد عناوين تخص مصر ضمن النتائج الحالية.")
 
@@ -1430,7 +1403,7 @@ def render_saved():
                     x = labels[lab]
                     txt, _ = speech_text(x["url"], x.get("title_ar", ""), ss.get("tts_mode", TTS_MODES[0]))
                     num = ORDINALS[n] if n < len(ORDINALS) else str(n + 1)
-                    parts.append(f"الخبر {num}. من {_ar_name(source_name(x.get('domain', '')))}، {source_country(x.get('domain', ''))}. {txt}")
+                    parts.append(f"الخبر {num}. من {source_name(x.get('domain', ''))}. {txt}")
                     prog.progress((n + 1) / (len(picked) + 1), text=f"جُهّز {n + 1} من {len(picked)}")
                 full = "نشرة رادار الأخبار. " + " ... ".join(parts) + " ... انتهت النشرة."
                 prog.progress(0.95, text=f"جارٍ النطق (حوالي {len(full) / 13 / 60:.0f} دقيقة صوت)…")
