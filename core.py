@@ -59,6 +59,24 @@ def _gtx(text, src, dest):
     return "".join(seg[0] for seg in r.json()[0] if seg and seg[0])
 
 
+_MM_CODE = {"iw": "he", "zh": "zh-CN"}
+
+
+def _mymemory(text, src, dest):
+    """محرك احتياطي ثالث (MyMemory) عند حجب أو فشل ترجمة جوجل"""
+    if src == "auto":
+        src = "ar" if _HAS_AR.search(text) else ("he" if re.search(r"[\u0590-\u05FF]", text) else "en")
+    r = requests.get("https://api.mymemory.translated.net/get",
+                     params={"q": text[:480], "langpair": f"{_MM_CODE.get(src, src)}|{_MM_CODE.get(dest, dest)}"},
+                     headers=UA, timeout=20)
+    r.raise_for_status()
+    j = r.json()
+    out = (j.get("responseData") or {}).get("translatedText", "") or ""
+    if str(j.get("responseStatus")) != "200" or "MYMEMORY WARNING" in out.upper():
+        raise ValueError("MyMemory refused")
+    return out
+
+
 def tr(text, src="auto", dest="ar"):
     """يترجم ولا يخزّن نتائج الفشل (حتى لا يبقى الفشل المؤقت دائماً)"""
     text = (text or "").strip()
@@ -73,6 +91,7 @@ def tr(text, src="auto", dest="ar"):
         for fn in (
             (lambda: GoogleTranslator(source=src, target=dest).translate(text)) if GoogleTranslator else None,
             lambda: _gtx(text, src, dest),
+            (lambda: _mymemory(text, src, dest)) if attempt >= 1 else None,
         ):
             if fn is None:
                 continue
@@ -392,7 +411,13 @@ def clean_words(x, code, min_len):
     return out
 
 
+def _tidy_term(t):
+    return " ".join(re.sub(r"[()\[\]{}\"“”„«»]", " ", t or "").split())
+
+
 def build_term(term, code, match, pre=False):
+    if not pre:
+        term = _tidy_term(term) or term
     x = term if pre else tr(term, "ar", GT_CODE.get(code, code))
     if not pre and code != "ar" and _HAS_AR.search(x):
         raise TranslationError(f"تعذّرت ترجمة «{term}» إلى {LANG_NAME_AR.get(code, code)}")
@@ -1014,6 +1039,7 @@ def gnews_site_search(selected, days, terms=None, joiner="OR", author=None, auth
                 names.append(who)
         tparts = []
         for t in terms or []:
+            t = _tidy_term(t) or t
             if code == "ar":
                 x = t if _HAS_AR.search(t) else tr(t, "en", "ar")
             else:
