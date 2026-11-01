@@ -1101,6 +1101,30 @@ def author_search(key, sel, country, author_raw, he_raw, only_confirmed, with_te
     update_meta(data, sel)
 
 
+def direct_title_hits(key, sel, terms):
+    """بحث سريع بالكلمات في عناوين خلاصات المصادر المباشرة (RSS/الصفحة الرئيسية)، لأن GDELT وأخبار Google لا يغطيان كل المواقع"""
+    d_items, d_notes = core.direct_headlines(sel, days_in_range())
+    if ctype != "الكل":
+        d_items = [a for a in d_items if a.get("ctype") == ctype]
+    matchers = core.make_matchers(terms, core.codes_for(sel))
+    hits = [a for a in d_items if core.find_mentions(a.get("title", ""), matchers, joiner)[0]]
+    core.translate_titles(hits)
+    data = st.session_state.get(f"res_{key}") or {"items": [], "errors": [], "used": [], "summaries": {}, "counts": {}, "silent": [], "hidden": 0, "hl": []}
+    have = {x["url"].split("?")[0].rstrip("/") for x in data["items"]}
+    new = [a for a in hits if a["url"].split("?")[0].rstrip("/") not in have]
+    hl = sorted({st_ for alts in matchers for stems in alts for st_ in stems}, key=len, reverse=True)
+    data["items"] = sorted(data["items"] + new, key=lambda a: a.get("seendate", ""), reverse=True)
+    data["used"] = list(data.get("used", [])) + d_notes + [f"بحث العناوين المباشر ⟵ فُحص {len(d_items)} عنواناً من خلاصات المصادر ⟵ طابق {len(hits)} (جديد: {len(new)})"]
+    data["hl"] = sorted(set(data.get("hl", [])) | set(hl), key=len, reverse=True)
+    data["partial"] = False
+    if new:
+        data["errors"] = []  # وُجدت نتائج، فلا داعي لتحذير «لا نتائج»
+    st.session_state[f"res_{key}"] = data
+    update_meta(data, sel)
+    if new:
+        st.success(f"📡 لقيت {len(new)} نتيجة إضافية من خلاصة المصدر المباشرة (غير موجودة في GDELT ولا أخبار Google).")
+
+
 def body_search(key, sel, terms, gn_country, n):
     """بحث في نص المقالات: يجمع أحدث عناوين المصادر (من مواقعها ثم أخبار Google) ويقرأ نص كل مقال ويُبقي ما ذُكرت فيه كلماتك"""
     bar = st.progress(0.0, text="جارٍ جمع أحدث مقالات المصادر…")
@@ -1201,7 +1225,13 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
                 st.session_state[f"res_{key}"]["used"] += gnotes
             if use_body and sel and terms:
                 body_search(key, sel, terms, gn_country, body_n)
-            elif use_body and not terms:
+            elif sel and terms:
+                with st.spinner("جارٍ البحث كمان في عناوين خلاصات المصادر مباشرة…"):
+                    try:
+                        direct_title_hits(key, sel, terms)
+                    except Exception as ex:
+                        st.caption(f"تعذّر البحث المباشر في الخلاصات: {type(ex).__name__}")
+            if use_body and not terms:
                 st.warning("اكتب كلمة بحث أعلى الصفحة عشان البحث داخل النص.")
     render_results(key)
 
