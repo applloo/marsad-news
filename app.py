@@ -1447,8 +1447,16 @@ def render_keys_admin():
         st.info("البوابة غير مفعّلة. لتفعيلها أضف في Secrets قيمة **ADMIN_KEY** (كلمة سر طويلة تخصّك) إلى جانب GITHUB_TOKEN وGIST_ID، "
                 "ثم أعد تشغيل التطبيق. بعد التفعيل لن يفتح التطبيق إلا بشفرة، وتدخل أنت بكلمة ADMIN_KEY.")
         return
-    base = st.text_input("رابط التطبيق", value=_sec("APP_URL") or st.session_state.get("app_url", ""),
-                         placeholder="https://اسم-تطبيقك.streamlit.app", key="app_url").strip().rstrip("/")
+    def _host_url():
+        try:
+            h = st.context.headers.get("Host", "")
+            return f"https://{h}" if h and not h.startswith(("localhost", "127.")) else ""
+        except Exception:
+            return ""
+
+    base = (_sec("APP_URL") or _host_url() or st.session_state.get("app_url", "")).strip().rstrip("/")
+    if not base:
+        base = st.text_input("رابط التطبيق (اكتبه مرة واحدة)", placeholder="https://اسم-تطبيقك.streamlit.app", key="app_url").strip().rstrip("/")
     c1, c2 = st.columns(2)
     label = c1.text_input("اسم الشخص / الجهة (لتعرف لمن أعطيتها)", key="k_label")
     durs = {"6 ساعات": 6, "يوم": 24, "3 أيام": 72, "أسبوع": 168, "أسبوعان": 336, "شهر": 720, "مدة أخرى (بالساعات)": 0}
