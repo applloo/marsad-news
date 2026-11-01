@@ -14,6 +14,7 @@ import requests
 
 import core
 import intel
+import links
 from sources import ARABIC, EGYPT_ARABIC, ISRAEL, REGION, UK, USA
 
 REPORTS_FILE = "marsad_reports.json"
@@ -164,12 +165,48 @@ def overview(files):
     return "\n".join(out)
 
 
+def link_threads(pool, log=print):
+    """خيوط الربط السياسي: تجمع من كل الملفات ما يتصل بكل خيط (بالأسماء والكلمات المشتركة)"""
+    out = {}
+    links.tag_pool(pool)
+    for t in links.THREADS:
+        name = "🔗 " + t
+        its = links.thread_items(pool, t)
+        if not its:
+            out[name] = {"brief": "", "items": [], "total": 0, "egypt": 0}
+            continue
+        info = links.analyse(its, t, pool)
+        top = sorted(its, key=lambda a: links._score(a, t), reverse=True)[:PER_FILE]
+        core.translate_titles([a for a in top if not a.get("title_ar")])
+        with ThreadPoolExecutor(4) as ex:
+            list(ex.map(snippet, [a for a in top if a["ctype"] != "تسريب غير مؤكد" and not a.get("snip_ar")][:4]))
+
+        def row(a, t=t):
+            tags = "، ".join(a["threads"][t][:3])
+            return _row(a) + f" — 🏷️ {tags}"
+
+        shown = sorted([a for a in top if a["ctype"] != "تسريب غير مؤكد"], key=lambda a: (bool(a.get("snip_ar")), links._score(a, t)), reverse=True)[:6]
+        keep = ("title_ar", "title", "url", "domain", "side", "ctype", "egypt", "seendate", "snip_ar")
+        items = []
+        for a in sorted(top, key=lambda a: a.get("seendate", ""), reverse=True):
+            d = {k: a.get(k, "") for k in keep}
+            d["ents"] = a["threads"][t]
+            items.append(d)
+        out[name] = {"brief": links.brief(t, its, info, shown, row, extra=top), "items": items, "total": len(its),
+                     "egypt": sum(1 for a in its if a.get("egypt"))}
+        log(f"{name}: {len(its)} عنواناً")
+    return out
+
+
 def build(files, log=print):
     sel, meta = all_sources()
     out = {"files": {}, "overview": ""}
+    pool = {}
     for fn in files:
         try:
             raw = collect(fn, sel, meta)
+            for a in raw:
+                pool.setdefault(a["url"], a)
             items = pick(raw, intel.FILES[fn]["terms"] + intel.FILES[fn]["egypt"])
         except Exception as e:  # ملف واحد لا يُسقط التقرير كله
             log(f"! {fn}: {type(e).__name__} {e}")
@@ -179,6 +216,10 @@ def build(files, log=print):
                             "egypt": sum(1 for a in raw if a["egypt"])}
         log(f"{fn}: {len(raw)} عنواناً، اخترنا {len(items)}")
         time.sleep(1)
+    try:
+        out["files"].update(link_threads(list(pool.values()), log))
+    except Exception as e:  # الربط لا يُسقط التقرير
+        log(f"! الربط: {type(e).__name__} {e}")
     out["overview"] = overview(out["files"])
     return out
 

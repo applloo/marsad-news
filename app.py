@@ -16,6 +16,7 @@ import core
 import intel
 from core import fmt_seen, tr
 import hmac
+import links as links_mod
 from about import TAB_HELP, TAB_NAMES, points as about_points
 import keys as keys_mod
 import store
@@ -533,7 +534,7 @@ def render_about():
     """قسم «ما هذا التطبيق؟»: يُبنى من بيانات التطبيق نفسها فيتحدّث تلقائياً"""
     n_src = len({d for g in (ISRAEL, USA, UK, REGION, ARABIC) for ents in g.values() for _, d, _ in ents})
     stats = {"n_sources": n_src, "langs": [core.LANG_NAME_AR.get(c, c) for c, _, _, _ in core.LANGS],
-             "n_writers": len(WRITERS), "n_files": len(intel.FILES), "file_names": list(intel.FILES)}
+             "n_writers": len(WRITERS), "n_files": len(intel.FILES), "file_names": list(intel.FILES), "threads": list(links_mod.THREADS)}
     with st.expander("ℹ️ ما هذا التطبيق؟ وماذا يفعل؟"):
         st.markdown("\n".join(f"{i}. {p}" for i, p in enumerate(about_points(stats), 1)))
         st.markdown("**أقسام التطبيق:**")
@@ -587,6 +588,7 @@ def render_daily():
             lnk = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a['title'][:200], safe='')}{auth_qs()}"
             st.markdown(f"- {'🇪🇬 ' if a.get('egypt') else ''}**{a['title_ar']}** — {source_name(a['domain'])} · {a['ctype']} · "
                         f"{intel.SIDES.get(a['side'], '')}  \n  [ترجم المقال]({lnk}) · [الأصل]({a['url']})"
+                        + (f"  \n  🏷️ {'، '.join(a['ents'])}" if a.get("ents") else "")
                         + (f"  \n  > {a['snip_ar']}" if a.get("snip_ar") else ""))
 
 
