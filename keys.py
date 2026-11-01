@@ -62,9 +62,9 @@ def is_valid(k, at=None):
     return status(k, at) in ("active", "unused")
 
 
-def create(keys, label, hours):
+def create(keys, label, hours, scope="full"):
     k = {"code": new_code(), "label": (label or "").strip() or "بدون اسم", "hours": float(hours),
-         "created": iso(now()), "first_seen": "", "last_seen": "", "visits": 0, "revoked": False}
+         "scope": scope, "created": iso(now()), "first_seen": "", "last_seen": "", "visits": 0, "revoked": False}
     keys.append(k)
     return k
 
