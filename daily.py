@@ -4,8 +4,10 @@
 الأسرار المطلوبة: GIST_TOKEN و GIST_ID. لا يستخدم أي ذكاء اصطناعي ولا يستهلك رصيد Anthropic."""
 import json
 import os
+import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -64,22 +66,75 @@ def rank(a):
     return (a["egypt"], a["kind"] in ("think", "official", "data"), a.get("seendate", ""))
 
 
-def pick(items, n=PER_FILE):
-    top = sorted(items, key=rank, reverse=True)[:n]
-    core.translate_titles(top)
-    keep = ("title_ar", "title", "url", "domain", "side", "ctype", "egypt", "seendate")
+STOP = {"news", "with", "from", "that", "this", "attacks", "military", "assessment"}
+
+
+def term_stems(terms):
+    """جذور كلمات الملف بالإنجليزية والعربية، لحذف العناوين التي لا علاقة لها بالملف"""
+    en, ar = set(), set()
+    for t in terms:
+        for w in re.findall(r"[A-Za-z]{4,}", t):
+            if w.lower() not in STOP:
+                en.add(w.lower()[:5])
+        try:
+            t_ar = core.tr(t, "en", "ar")
+        except Exception:
+            t_ar = ""
+        for w in re.findall(r"[\u0600-\u06FF]{3,}", t_ar):
+            w = w[2:] if w.startswith("ال") and len(w) > 4 else w
+            ar.add(w[:4])
+    return en, ar
+
+
+def relevant(a, en, ar):
+    if a["egypt"] or a["kind"] in ("think", "official", "data"):
+        return True  # المؤسسات المتخصصة وما يخص مصر نبقيه دائماً
+    t = a["title"].lower()
+    return any(x in t for x in en) or any(x in a.get("title_ar", "") for x in ar)
+
+
+def snippet(a):
+    """جملتان من أول المقال مترجمتان للعربية (إن أمكن فتح المقال)"""
+    try:
+        if "news.google.com" in a["url"]:
+            return
+        art = core.fetch_article(a["url"])
+        if not art:
+            return
+        sents = [x.strip() for x in re.split(r"(?<=[.!?؟])\s+|\n+", art["text"]) if len(x.strip()) > 50]
+        sents = [x for x in sents if not re.search(r"cookie|subscribe|sign in|javascript|©|newsletter", x, re.I)][:2]
+        if sents:
+            a["snip_ar"] = core.tr(" ".join(sents)[:600], "auto", "ar")
+    except Exception:
+        pass
+
+
+def pick(items, terms, n=PER_FILE, snip_n=5):
+    en, ar = term_stems(terms)
+    cand = sorted(items, key=rank, reverse=True)[: n * 3]
+    core.translate_titles(cand)
+    ok = [a for a in cand if relevant(a, en, ar)]
+    if len(ok) < 8:  # يوم هادئ: لا نُفرط في الحذف
+        ok = cand
+    top = ok[:n]
+    with ThreadPoolExecutor(4) as ex:
+        list(ex.map(snippet, [a for a in top if a["ctype"] != "تسريب غير مؤكد"][:snip_n]))
+    keep = ("title_ar", "title", "url", "domain", "side", "ctype", "egypt", "seendate", "snip_ar")
     return [{k: a.get(k, "") for k in keep} for a in sorted(top, key=lambda a: a.get("seendate", ""), reverse=True)]
 
 
 def _row(a):
     d = a.get("domain", "")
-    return f"- {a['title_ar']} ({d})"
+    out = f"- {a['title_ar']} ({d})"
+    if a.get("snip_ar"):
+        out += f"\n  > {a['snip_ar']}"
+    return out
 
 
 def brief_for(file_name, items):
     """نشرة بلا ذكاء اصطناعي ولا تكلفة: ترتيب وتجميع للعناوين نفسها"""
     out = []
-    top = [a for a in items if a["ctype"] != "تسريب غير مؤكد"][:6]
+    top = sorted([a for a in items if a["ctype"] != "تسريب غير مؤكد"], key=lambda a: bool(a.get("snip_ar")), reverse=True)[:6]
     if top:
         out += ["## أهم العناوين", *[_row(a) for a in top], ""]
     eg = [a for a in items if a["egypt"]][:8]
@@ -115,7 +170,7 @@ def build(files, log=print):
     for fn in files:
         try:
             raw = collect(fn, sel, meta)
-            items = pick(raw)
+            items = pick(raw, intel.FILES[fn]["terms"] + intel.FILES[fn]["egypt"])
         except Exception as e:  # ملف واحد لا يُسقط التقرير كله
             log(f"! {fn}: {type(e).__name__} {e}")
             out["files"][fn] = {"brief": "", "items": [], "error": f"{type(e).__name__}"}

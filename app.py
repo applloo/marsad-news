@@ -586,7 +586,8 @@ def render_daily():
                 continue
             lnk = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a['title'][:200], safe='')}{auth_qs()}"
             st.markdown(f"- {'🇪🇬 ' if a.get('egypt') else ''}**{a['title_ar']}** — {source_name(a['domain'])} · {a['ctype']} · "
-                        f"{intel.SIDES.get(a['side'], '')}  \n  [ترجم المقال]({lnk}) · [الأصل]({a['url']})")
+                        f"{intel.SIDES.get(a['side'], '')}  \n  [ترجم المقال]({lnk}) · [الأصل]({a['url']})"
+                        + (f"  \n  > {a['snip_ar']}" if a.get("snip_ar") else ""))
 
 
 render_about()
