@@ -226,19 +226,64 @@ def _extract(content, enc=None):
     return out
 
 
-@lru_cache(maxsize=512)
+BROWSER_HEADERS = {
+    **UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ar;q=0.6",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+}
+_ART_CACHE, FETCH_WHY = {}, {}
+_LD_BODY = re.compile(r'"articleBody"\s*:\s*"((?:[^"\\]|\\.){80,})"', re.S)
+_META_DESC = re.compile(r'<meta[^>]+(?:property|name)=["\'](?:og:description|description|twitter:description)["\'][^>]*content=["\']([^"\']{80,})', re.I)
+
+
+def _fallback_text(html_text):
+    """عند فشل الاستخراج العادي: articleBody في JSON-LD ثم وصف الصفحة"""
+    m = _LD_BODY.search(html_text)
+    if m:
+        try:
+            return json.loads('"' + m.group(1) + '"')
+        except ValueError:
+            pass
+    m = _META_DESC.search(html_text)
+    return _html.unescape(m.group(1)) if m else ""
+
+
 def fetch_article(url):
+    """يعيد dict بالنص أو None؛ سبب الفشل يُحفظ في FETCH_WHY[url]. الفشل لا يُخزَّن مؤقتاً فتصح المحاولة التالية"""
+    if url in _ART_CACHE:
+        return _ART_CACHE[url]
     if not is_safe_url(url):
+        FETCH_WHY[url] = "رابط غير مسموح"
         return None
-    try:
-        r = requests.get(url, headers=UA, timeout=15)
-        r.raise_for_status()
-        d = _extract(r.content, r.encoding or r.apparent_encoding)
-        if len(d["text"]) < 200:
-            return None
-        return d
-    except Exception:
-        return None
+    why = ""
+    for attempt in range(2):
+        try:
+            r = requests.get(url, headers=BROWSER_HEADERS, timeout=20)
+            if r.status_code in (403, 429, 503):
+                why = f"الموقع رفض الطلب الآلي (HTTP {r.status_code})"
+                time.sleep(1.5)
+                continue
+            r.raise_for_status()
+            enc = r.encoding or r.apparent_encoding
+            d = _extract(r.content, enc)
+            if len(d["text"]) < 200:
+                html_text = r.content.decode(enc or "utf-8", errors="replace")
+                alt = _fallback_text(html_text)
+                if len(alt) > len(d["text"]):
+                    d["text"] = alt
+            if len(d["text"]) < 80:
+                FETCH_WHY[url] = "الصفحة وصلت لكن لم يُعثر فيها على نص مقال (قد تُحمَّل بالجافاسكربت)"
+                return None
+            _ART_CACHE[url] = d
+            return d
+        except Exception as e:
+            why = f"تعذّر الفتح ({type(e).__name__})"
+    FETCH_WHY[url] = why or "تعذّر الفتح"
+    return None
 
 
 # ───────────────────────── تصنيف وتنسيق ─────────────────────────

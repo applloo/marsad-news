@@ -200,3 +200,54 @@ REGION = {
         ("إيران إنترناشيونال (معارضة)", "iranintl.com", "fa,en"),
     ],
 }
+
+
+# ───────── بلد كل مصدر (لإظهاره بجانب اسمه في كل مكان) ─────────
+FLAGS = {"إسرائيل": "🇮🇱", "أمريكا": "🇺🇸", "بريطانيا": "🇬🇧", "مصر": "🇪🇬", "السعودية": "🇸🇦", "الإمارات": "🇦🇪", "قطر": "🇶🇦",
+         "لبنان": "🇱🇧", "تركيا": "🇹🇷", "إيران": "🇮🇷", "إثيوبيا": "🇪🇹", "فرنسا": "🇫🇷", "السويد": "🇸🇪", "بلجيكا": "🇧🇪",
+         "جنوب أفريقيا": "🇿🇦", "هولندا": "🇳🇱", "الأمم المتحدة": "🇺🇳", "أوروبا": "🇪🇺", "السودان": "🇸🇩"}
+_TLD = {"il": "إسرائيل", "uk": "بريطانيا", "tr": "تركيا", "ir": "إيران", "et": "إثيوبيا", "eg": "مصر", "sa": "السعودية", "ae": "الإمارات",
+        "qa": "قطر", "lb": "لبنان", "fr": "فرنسا", "se": "السويد", "sd": "السودان", "za": "جنوب أفريقيا", "nl": "هولندا", "eu": "أوروبا"}
+_OVERRIDE = {
+    "reuters.com": "بريطانيا", "france24.com": "فرنسا", "memri.org": "أمريكا", "i24news.tv": "إسرائيل",
+    "middleeasteye.net": "بريطانيا", "newarab.com": "بريطانيا", "middleeastmonitor.com": "بريطانيا", "opendemocracy.net": "بريطانيا",
+    "thejc.com": "بريطانيا", "alquds.co.uk": "بريطانيا", "alaraby.co.uk": "بريطانيا", "iranintl.com": "بريطانيا",
+    "sudantribune.com": "فرنسا", "aljazeera.net": "قطر", "aawsat.com": "السعودية", "alarabiya.net": "السعودية", "asharq.com": "السعودية",
+    "okaz.com.sa": "السعودية", "al-akhbar.com": "لبنان", "almayadeen.net": "لبنان", "independentarabia.com": "السعودية",
+    "skynewsarabia.com": "الإمارات", "alittihad.ae": "الإمارات", "alkhaleej.ae": "الإمارات", "dw.com": "ألمانيا",
+    "sipri.org": "السويد", "iiss.org": "بريطانيا", "rusi.org": "بريطانيا", "chathamhouse.org": "بريطانيا", "crisisgroup.org": "بلجيكا",
+    "ecfr.eu": "أوروبا", "issafrica.org": "جنوب أفريقيا", "bellingcat.com": "هولندا", "acleddata.com": "أمريكا", "liveuamap.com": "أوكرانيا",
+    "digitallibrary.un.org": "الأمم المتحدة", "reliefweb.int": "الأمم المتحدة", "crsreports.congress.gov": "أمريكا",
+    "arabcenterdc.org": "أمريكا", "mei.edu": "أمريكا", "africacenter.org": "أمريكا", "setav.org": "تركيا",
+    "understandingwar.org": "أمريكا", "rand.org": "أمريكا", "warontherocks.com": "أمريكا", "stimson.org": "أمريكا",
+    "israel-alma.org": "إسرائيل", "besacenter.org": "إسرائيل", "egyptindependent.com": "مصر", "dailynewsegypt.com": "مصر",
+    "egypttoday.com": "مصر",
+    "khamenei.ir": "إيران", "presstv.ir": "إيران", "alalam.ir": "إيران",
+}
+FLAGS.update({"ألمانيا": "🇩🇪", "أوكرانيا": "🇺🇦"})
+_DOM_COUNTRY = dict(_OVERRIDE)
+for _g, _c in ((ISRAEL, "إسرائيل"), (USA, "أمريكا"), (UK, "بريطانيا")):
+    for _ents in _g.values():
+        for _n, _d, _l in _ents:
+            for _x in _d.split("|"):
+                _DOM_COUNTRY.setdefault(_x, _c)
+for _title, _ents in REGION.items():
+    _c = "إثيوبيا" if "إثيوبيا" in _title else "تركيا" if "تركيا" in _title else "إيران"
+    for _n, _d, _l in _ents:
+        _DOM_COUNTRY.setdefault(_d, _c)
+for _ents in ARABIC.values():
+    for _n, _d, _l in _ents:
+        _DOM_COUNTRY.setdefault(_d, "مصر" if _d in EGYPT_ARABIC else "")
+
+
+def source_country(domain):
+    """اسم دولة المصدر بالعربية (أو '' إن لم تُعرف)"""
+    d = (domain or "").lower().replace("www.", "").strip()
+    parts = d.split(".")
+    for i in range(len(parts) - 1):
+        c = _DOM_COUNTRY.get(".".join(parts[i:]))
+        if c:
+            return c
+    if parts[-1] in _TLD:
+        return _TLD[parts[-1]]
+    return ""
