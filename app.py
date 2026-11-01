@@ -15,6 +15,7 @@ import streamlit as st
 import core
 import intel
 from core import fmt_seen, tr
+import gh_actions
 import hmac
 import links as links_mod
 from about import TAB_HELP, TAB_NAMES, points as about_points
@@ -599,9 +600,41 @@ def render_about():
         st.markdown("\n".join(f"- **{n}** — {TAB_HELP[n]}" for n in TAB_NAMES))
 
 
+def render_run_report():
+    """زر المالك: تشغيل التقرير اليومي الآن من التطبيق (يستدعي GitHub Actions)"""
+    tok, repo, branch = _sec("ACTIONS_TOKEN"), _sec("GH_REPO") or gh_actions.DEFAULT_REPO, _sec("GH_BRANCH") or "main"
+    with st.expander("🔄 تحديث التقرير الآن (للمالك فقط)"):
+        if not tok:
+            st.info("لتفعيل الزر أضف في Secrets قيمة **ACTIONS_TOKEN**. أنشئ توكن من GitHub ← الصورة الشخصية ← Settings ← Developer settings ← "
+                    "Personal access tokens ← Tokens (classic) ← Generate new token، وفعّل صلاحيتين: **repo** و**workflow**، ثم الصق قيمته. "
+                    f"(المستودع الحالي: {repo})")
+            return
+        try:
+            lr = gh_actions.last_run(tok, repo)
+        except Exception as e:
+            st.error(f"تعذّر قراءة حالة التشغيل ({type(e).__name__}). غالباً التوكن ناقص الصلاحية.")
+            lr = None
+        busy = bool(lr and lr["status"] in ("queued", "in_progress", "waiting", "requested"))
+        if lr:
+            ico = {"success": "✅ نجح", "failure": "❌ فشل", "cancelled": "⚪ أُلغي"}.get(lr["conclusion"] or "", "⏳ يعمل الآن" if busy else "—")
+            when = keys_mod.parse(lr["created"])
+            when_txt = when.astimezone(core.TZ).strftime("%Y-%m-%d %H:%M") if when else ""
+            st.markdown(f"آخر تشغيل: **{ico}** — بدأ {when_txt} (القاهرة) · [تفاصيله على GitHub]({lr['url']})")
+        c1, c2 = st.columns(2)
+        if c1.button("▶️ شغّل التقرير الآن", type="primary", disabled=busy, key="run_rep", use_container_width=True):
+            ok, msg = gh_actions.dispatch(tok, repo, branch)
+            (st.success if ok else st.error)(msg)
+        if c2.button("🔁 حدّث الحالة", key="run_status", use_container_width=True):
+            st.rerun()
+        if busy:
+            st.caption("هناك تشغيل جارٍ، لذلك الزر معطّل حتى ينتهي. اضغط «حدّث الحالة» بين فترة وأخرى، ثم أعد تحميل الصفحة ليظهر التقرير الجديد.")
+
+
 def render_daily():
     st.caption("نشرة تُولَّد تلقائياً كل صباح (نحو 6 بتوقيت القاهرة) لكل ملف، من عناوين عشرات المصادر العالمية والعربية، "
                "مع ما يخص مصر. ترتيب وتجميع للعناوين نفسها (بلا ذكاء اصطناعي)، وليس حكماً على صحة الأخبار.")
+    if IS_ADMIN:
+        render_run_report()
     if not (_GT and _GG):
         st.info("التقرير اليومي يحتاج التخزين الدائم (GITHUB_TOKEN وGIST_ID).")
         return
