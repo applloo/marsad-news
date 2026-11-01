@@ -54,16 +54,19 @@ def _ar_name(label):
 
 
 def src_label(domain, with_domain=True):
-    """«اسم المصدر بالعربية · 🏳️ دولته» — يُستخدم في كل مكان يظهر فيه مصدر"""
-    dom = (domain or "").lower().replace("www.", "")
-    name = source_name(dom)
-    name_ar = _ar_name(name) if name != dom else dom
-    country = source_country(dom)
-    out = html.escape(name_ar)
-    if with_domain and name_ar != dom:
-        out += f" ({html.escape(dom)})"
-    out += f" · {FLAGS.get(country, '🏳️')} {country}" if country else " · 🏳️ دولة غير محددة"
-    return out
+    """«اسم المصدر بالعربية · 🏳️ دولته» — يُستخدم في كل مكان يظهر فيه مصدر. لا يُسقط الصفحة أبداً"""
+    try:
+        dom = str(domain or "").lower().replace("www.", "")
+        name = str(source_name(dom))
+        name_ar = str(_ar_name(name)) if name != dom else dom
+        country = str(source_country(dom) or "")
+        out = html.escape(name_ar)
+        if with_domain and name_ar != dom:
+            out += f" ({html.escape(dom)})"
+        out += (f" · {FLAGS.get(country, '🏳️')} {country}" if country else " · 🏳️ دولة غير محددة")
+        return out
+    except Exception as e:  # أي خطأ هنا لا يجب أن يكسر عرض الخبر
+        return html.escape(str(domain or "")) + f" (تعذّر تحديد الدولة: {type(e).__name__})"
 
 
 st.set_page_config(page_title="رادار الأخبار العالمية", page_icon="📰", layout="centered")
@@ -640,11 +643,19 @@ def render_daily():
         for a in shown:
             if only_eg and not a.get("egypt"):
                 continue
-            lnk = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a['title'][:200], safe='')}{auth_qs()}"
-            st.markdown(f"- {'🇪🇬 ' if a.get('egypt') else ''}**{a['title_ar']}** — {src_label(a['domain'])} · {a['ctype']} · "
-                        f"{intel.SIDES.get(a['side'], '')}  \n  [ترجم المقال]({lnk}) · [الأصل]({a['url']})"
-                        + (f"  \n  🏷️ {'، '.join(a['ents'])}" if a.get("ents") else "")
-                        + (f"  \n  > {a['snip_ar']}" if a.get("snip_ar") else ""))
+            try:
+                lnk = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a['title'][:200], safe='')}{auth_qs()}"
+                eg_mark = "🇪🇬 " if a.get("egypt") else ""
+                side_txt = intel.SIDES.get(a.get("side", ""), "")
+                line = (f"- {eg_mark}**{a.get('title_ar', '')}** — {src_label(a.get('domain', ''))} · {a.get('ctype', '')} · "
+                        f"{side_txt}  \n  [ترجم المقال]({lnk}) · [الأصل]({a.get('url', '')})")
+                if a.get("ents"):
+                    line += "  \n  🏷️ " + "، ".join(str(x) for x in a["ents"])
+                if a.get("snip_ar"):
+                    line += "  \n  > " + str(a["snip_ar"])
+                st.markdown(line)
+            except Exception as e:
+                st.caption(f"⚠️ تعذّر عرض عنوان ({type(e).__name__}: {e})")
 
 
 render_about()
