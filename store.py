@@ -58,3 +58,22 @@ def merge(base, extra):
     base["writers"] += [x for x in extra["writers"] if x.get("id") not in seen]
     # الشفرات لا تُدمج من النسخ الاحتياطية (تبقى كما هي في الـGist)
     return base
+
+
+REPORTS_FILE = "marsad_reports.json"
+
+
+def load_reports(token, gist_id):
+    """التقارير اليومية التي يكتبها daily.py ({'latest': 'YYYY-MM-DD', 'archive': {...}}) — للقراءة فقط"""
+    r = requests.get(API + gist_id, headers=_headers(token), timeout=20)
+    r.raise_for_status()
+    f = (r.json().get("files") or {}).get(REPORTS_FILE)
+    if not f:
+        return {}
+    content = f.get("content") or ""
+    if f.get("truncated") and f.get("raw_url"):
+        content = requests.get(f["raw_url"], headers=_headers(token), timeout=20).text
+    try:
+        return json.loads(content or "{}")
+    except ValueError:
+        return {}
