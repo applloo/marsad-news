@@ -118,3 +118,31 @@ SECTIONS = {
     "reuters.com": [("الشرق الأوسط", "https://www.reuters.com/world/middle-east/", None)],
     "al-monitor.com": [("الصفحة الرئيسية", "https://www.al-monitor.com/", None)],
 }
+
+# صحف عربية (للمقارنة داخل مكتب الاستخبارات): (الاسم، الدومين، "ar")
+ARABIC = {
+    "🇪🇬 صحف مصرية": [
+        ("الأهرام", "ahram.org.eg", "ar"),
+        ("المصري اليوم", "almasryalyoum.com", "ar"),
+        ("اليوم السابع", "youm7.com", "ar"),
+        ("الشروق", "shorouknews.com", "ar"),
+        ("الوطن", "elwatannews.com", "ar"),
+        ("مدى مصر", "madamasr.com", "ar"),
+    ],
+    "🌍 صحف وقنوات عربية": [
+        ("الشرق الأوسط", "aawsat.com", "ar"),
+        ("العربية", "alarabiya.net", "ar"),
+        ("الجزيرة", "aljazeera.net", "ar"),
+        ("القدس العربي", "alquds.co.uk", "ar"),
+        ("العربي الجديد", "alaraby.co.uk", "ar"),
+        ("الأخبار اللبنانية", "al-akhbar.com", "ar"),
+        ("الميادين", "almayadeen.net", "ar"),
+        ("إندبندنت عربية", "independentarabia.com", "ar"),
+        ("سكاي نيوز عربية", "skynewsarabia.com", "ar"),
+        ("الاتحاد الإماراتية", "alittihad.ae", "ar"),
+        ("الخليج", "alkhaleej.ae", "ar"),
+        ("عكاظ", "okaz.com.sa", "ar"),
+        ("الشرق", "asharq.com", "ar"),
+    ],
+}
+EGYPT_ARABIC = {"ahram.org.eg", "almasryalyoum.com", "youm7.com", "shorouknews.com", "elwatannews.com", "madamasr.com"}

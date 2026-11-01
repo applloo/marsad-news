@@ -9,6 +9,7 @@ SIDES = {
     "eu": "🇪🇺 منظور أوروبي/دولي",
     "reg": "🌍 منظور إقليمي وأفريقي",
     "eg": "🇪🇬 منظور مصري",
+    "ar": "🌐 صحافة عربية",
     "osint": "📡 بيانات ومصادر مفتوحة",
     "uk": "🇬🇧 منظور بريطاني",
 }
@@ -100,8 +101,8 @@ LINK_QUESTIONS = [
 
 INTEL_TYPES = ["معلومة مؤكدة", "تقرير من مصدر متخصص", "تسريب غير مؤكد", "تقدير استراتيجي", "خبر إعلامي"]
 
-_LEAK = re.compile(r"reportedly|unconfirmed|leak|sources? (say|said|claim)|alleged|rumou?r|claims?\b|purported|unverified|according to (an )?unnamed", re.I)
-_ASSESS = re.compile(r"assessment|outlook|forecast|scenario|implications|what to expect|estimate|prospects|strategy|strategic|balance|trajector|options for", re.I)
+_LEAK = re.compile(r"تسريب|وفق مصادر|مصادر:|يُزعم|مزاعم|غير مؤكد|reportedly|unconfirmed|leak|sources? (say|said|claim)|alleged|rumou?r|claims?\b|purported|unverified|according to (an )?unnamed", re.I)
+_ASSESS = re.compile(r"تقدير|سيناريو|سيناريوهات|قراءة في|رؤية|assessment|outlook|forecast|scenario|implications|what to expect|estimate|prospects|strategy|strategic|balance|trajector|options for", re.I)
 
 
 def classify_intel(title, url, kind):

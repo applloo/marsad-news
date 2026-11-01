@@ -17,7 +17,7 @@ import intel
 from core import fmt_seen, tr
 import store
 import writers as writers_mod
-from sources import ISRAEL, SECTIONS, UK, USA
+from sources import ARABIC, EGYPT_ARABIC, ISRAEL, SECTIONS, UK, USA
 from writers import WRITERS
 
 DOMAIN_LABELS = {}
@@ -858,7 +858,7 @@ for _n, _d, _sd, _k, _f in intel.SOURCES:
     DOMAIN_LABELS.setdefault(_d, _n)
 
 
-def intel_run(file_name, terms, days, picked, with_media, media_sel):
+def intel_run(file_name, terms, days, picked, with_media, media_sel, ar_sel=()):
     meta = {}
     for n, d, sd, k, f in intel.SOURCES:
         if n in picked:
@@ -872,50 +872,100 @@ def intel_run(file_name, terms, days, picked, with_media, media_sel):
                     media.append((e[0], e[1], "en"))
                     for dd in e[1].split("|"):
                         meta.setdefault(dd, (sd, "media"))
+    for grp in ARABIC.values():
+        for lbl_, dom_, _l in grp:
+            if lbl_ in ar_sel:
+                media.append((lbl_, dom_, "ar"))
+                meta.setdefault(dom_, ("eg" if dom_ in EGYPT_ARABIC else "ar", "media"))
     allsel = sel + [m for m in media if m[1] not in {x[1] for x in sel}]
-    with st.spinner("جارٍ البحث في مراكز الأبحاث والمصادر وتصنيف النتائج…"):
-        items, notes = core.gnews_site_search(allsel, days, terms=terms, joiner="OR", country="US", max_items=120)
+    with st.spinner("جارٍ البحث في المؤسسات والمصادر وتصنيف النتائج…"):
+        items, notes = core.gnews_site_search(allsel, days, terms=terms or None, joiner="OR", country="US", max_items=200)
         for a in items:
             sd, k = next(((v[0], v[1]) for dd, v in meta.items() if core.domain_match(a["domain"], [dd])), ("osint", "think"))
             a["ctype"], a["ctype_sure"] = intel.classify_intel(a["title"], a["url"], k), False
             a["side"] = sd
+            a["egypt"] = bool(intel.EGYPT_RE.search(a["title"]))
         core.translate_titles(items)
         for a in items:
-            a["country_ar"] = intel.SIDES.get(a["side"], "")
+            a["country_ar"] = intel.SIDES.get(a["side"], "") + (" · 🇪🇬 يخص مصر" if a["egypt"] else "")
     data = {"items": items, "errors": [] if items else ["لم تُرجع أخبار Google نتائج — وسّع الفترة أو غيّر الكلمات."],
             "used": notes, "summaries": {}, "counts": {}, "silent": [], "hidden": 0, "hl": [],
-            "meta": {"file": file_name, "terms": terms, "days": days}}
+            "meta": {"file": file_name, "terms": terms or ["(كل ما نُشر)"], "days": days}}
     update_meta(data, None)
     st.session_state["res_in_all"] = data
 
 
+def intel_matrix(view):
+    """جدول ربط: المنظورات × أنواع المعلومة، وما يقوله كل منظور عن مصر"""
+    rows = ["| المنظور | " + " | ".join(intel.INTEL_TYPES) + " | يخص مصر |", "|" + "---|" * (len(intel.INTEL_TYPES) + 2)]
+    for code, name in intel.SIDES.items():
+        sub = [a for a in view if a.get("side") == code]
+        if not sub:
+            continue
+        cells = [str(sum(1 for a in sub if a.get("ctype") == t)) for t in intel.INTEL_TYPES]
+        rows.append(f"| {name} | " + " | ".join(cells) + f" | {sum(1 for a in sub if a.get('egypt'))} |")
+    st.markdown("\n".join(rows))
+    eg_items = [a for a in view if a.get("egypt")]
+    if eg_items:
+        st.markdown("**🇪🇬 ما تقوله كل جهة عن مصر في هذا الملف:**")
+        for code, name in intel.SIDES.items():
+            sub = [a for a in eg_items if a.get("side") == code][:6]
+            if sub:
+                st.markdown(f"*{name}*")
+                st.markdown("\n".join(f"- [{a.get('title_ar', '')}]({a['url']}) — {source_name(a['domain'])}" for a in sub))
+    else:
+        st.caption("لا توجد عناوين تخص مصر ضمن النتائج الحالية.")
+
+
 with tab_in:
-    st.caption("مكتب استخبارات مفتوح المصدر للشرق الأوسط والقرن الأفريقي: ابحث في مراكز الأبحاث الأمريكية والإسرائيلية والأوروبية والإقليمية، "
-               "وصنّف ما يظهر، وقارن المنظورات، ثم اصنع تقريراً تجميعياً. التصنيف تقديري من العنوان والرابط ولا يُغني عن مراجعة المصدر.")
+    st.caption("مكتب استخبارات مفتوح المصدر للشرق الأوسط والقرن الأفريقي: تصفّح مؤسسة واحدة أو عدة مؤسسات أو كلها، وأضف التحركات المصرية لأي ملف، "
+               "وقارن المنظورات في جدول ربط، ثم اصنع تقريراً. التصنيف تقديري من العنوان والرابط ولا يُغني عن مراجعة المصدر.")
     fname = st.radio("الملف", list(intel.FILES.keys()), horizontal=True, key="in_file")
     fmeta = intel.FILES[fname]
     st.markdown(f"**المحاور:** {fmeta['axes']}")
-    terms_txt = st.text_input("كلمات البحث (بالإنجليزية أو العربية، تُفصل بفاصلة)", value="، ".join(fmeta["terms"]), key=f"in_terms_{fname}")
+    egm = st.radio("التحركات المصرية", ["الملف + التحركات المصرية", "الملف فقط", "التحركات المصرية فقط"], horizontal=True, key="in_eg")
+    base_terms = fmeta["terms"] if egm != "التحركات المصرية فقط" else []
+    eg_terms = fmeta["egypt"] if egm != "الملف فقط" else []
+    qmode = st.radio("طريقة العرض", ["🔎 بحث بكلمات الملف", "📰 اعرض كل ما نُشر (بدون كلمات)"], horizontal=True, key="in_qmode")
+    terms_txt = ""
+    if qmode.startswith("🔎"):
+        terms_txt = st.text_input("كلمات البحث (يمكن تعديلها؛ بالإنجليزية أو العربية، بفاصلة)", value="، ".join(base_terms + eg_terms),
+                                  key=f"in_terms_{fname}_{egm}")
     names = [x[0] for x in intel.SOURCES]
-    sides_pick = st.multiselect("المنظورات", list(intel.SIDES.values())[:5], default=list(intel.SIDES.values())[:5], key="in_sides")
+    side_list = [v for k, v in intel.SIDES.items() if k != "uk"]
     side_codes = {v: k for k, v in intel.SIDES.items()}
-    default_src = [x[0] for x in intel.SOURCES if intel.SIDES[x[2]] in sides_pick]
-    picked = st.multiselect("المؤسسات", names, default=default_src, key=f"in_src_{'_'.join(sorted(side_codes[x] for x in sides_pick))}")
+    scope_i = st.radio("المؤسسات", ["مؤسسة واحدة", "عدة مؤسسات", "كل المؤسسات"], horizontal=True, key="in_scope", index=1)
+    if scope_i == "مؤسسة واحدة":
+        picked = [st.selectbox("المؤسسة", names, key="in_one")]
+    elif scope_i == "كل المؤسسات":
+        picked = names
+    else:
+        sides_pick = st.multiselect("المنظورات", side_list, default=side_list, key="in_sides")
+        default_src = [x[0] for x in intel.SOURCES if intel.SIDES[x[2]] in sides_pick]
+        picked = st.multiselect("المؤسسات", names, default=default_src, key=f"in_src_{'_'.join(sorted(side_codes[x] for x in sides_pick))}")
     days_i = st.selectbox("الفترة", ["آخر 7 أيام", "آخر 14 يوماً", "آخر 30 يوماً", "آخر 90 يوماً"], index=1, key="in_days")
     days_n = int(re.findall(r"\d+", days_i)[0])
-    with_media = st.checkbox("➕ ضمّ تغطية الإعلام الإسرائيلي والأمريكي والبريطاني لنفس الملف (للمقارنة)", value=True, key="in_media")
+    with_media = st.checkbox("➕ ضمّ تغطية الإعلام الإسرائيلي والأمريكي والبريطاني (للمقارنة)", value=True, key="in_media")
     media_sel = []
     if with_media:
         media_pool = [e[0] for g, gr in (("il", ISRAEL), ("us", USA), ("uk", UK)) for e in all_entries(g, gr) if e[2] in ("en", "both")]
         media_sel = st.multiselect("الصحف المضمومة", media_pool, default=[m for m in media_pool if m in (
-            "Times of Israel".replace("Times of Israel", "تايمز أوف إسرائيل"), "جيروزاليم بوست", "Axios", "Al-Monitor", "BBC", "The Guardian", "Reuters",
+            "تايمز أوف إسرائيل", "جيروزاليم بوست", "Axios", "Al-Monitor", "BBC", "The Guardian", "Reuters",
             "Foreign Policy", "Middle East Eye", "Ynetnews (إنجليزي)", "هآرتس (إنجليزي)")], key="in_media_sel")
-    if st.button("🛰️ ابحث في الملف", type="primary", use_container_width=True, key="go_in"):
+    use_ar = st.checkbox("➕ ضمّ الصحافة العربية (مصرية وخليجية) للمقارنة", value=False, key="in_ar")
+    ar_sel = []
+    if use_ar:
+        ar_pool = [e[0] for grp in ARABIC.values() for e in grp]
+        ar_sel = st.multiselect("الصحف العربية", ar_pool, default=ar_pool[:5] + ["الشرق الأوسط", "العربية", "الجزيرة"], key="in_ar_sel")
+        st.caption("تُترجم كلمات البحث تلقائياً إلى العربية. بحث اسم الكاتب لا يشمل الصحف العربية.")
+    if st.button("🛰️ ابحث / اعرض", type="primary", use_container_width=True, key="go_in"):
         tl = [t.strip() for t in re.split(r"[,،;\n]+", terms_txt) if t.strip()]
-        if not tl or not picked:
-            st.warning("اكتب كلمات البحث واختر مؤسسة واحدة على الأقل.")
+        if qmode.startswith("🔎") and not tl:
+            st.warning("اكتب كلمات البحث أو اختر «اعرض كل ما نُشر».")
+        elif not picked:
+            st.warning("اختر مؤسسة واحدة على الأقل.")
         else:
-            intel_run(fname, tl, days_n, picked, with_media, media_sel)
+            intel_run(fname, tl, days_n, picked, with_media, media_sel, ar_sel)
 
     allr = st.session_state.get("res_in_all")
     if allr:
@@ -923,11 +973,11 @@ with tab_in:
         c1_, c2_ = st.columns(2)
         f_type = c1_.multiselect("نوع المعلومة", intel.INTEL_TYPES, default=intel.INTEL_TYPES, key="in_ftype")
         f_side = c2_.multiselect("المنظور", list(intel.SIDES.values()), default=list(intel.SIDES.values()), key="in_fside")
-        view = [a for a in items if a.get("ctype") in f_type and intel.SIDES.get(a.get("side"), "") in f_side]
-        cnt = {}
-        for a in view:
-            cnt[a["country_ar"]] = cnt.get(a["country_ar"], 0) + 1
-        st.caption("توزيع المنظورات: " + "، ".join(f"{k} ({v})" for k, v in cnt.items()) if cnt else "لا نتائج ضمن الفلاتر.")
+        only_eg = st.checkbox("🇪🇬 اعرض ما يخص مصر فقط", value=False, key="in_onlyeg")
+        view = [a for a in items if a.get("ctype") in f_type and intel.SIDES.get(a.get("side"), "") in f_side and (a.get("egypt") or not only_eg)]
+        st.caption(f"{len(view)} نتيجة من {len(items)}")
+        with st.expander("🔗 خريطة الربط: المنظورات × أنواع المعلومة، وما يخص مصر"):
+            intel_matrix(view)
         st.session_state["res_in"] = {**allr, "items": sorted(view, key=lambda a: a.get("seendate", ""), reverse=True)}
         m = allr["meta"]
         rep = intel.build_report(f"تقرير: {m['file']}", m["file"], m["terms"], m["days"], view)
@@ -969,7 +1019,7 @@ COUNTRIES = {"كل الدول": None, "الولايات المتحدة": "US", "
 with tab_ml:
     st.caption(
         "ترجم كلماتك إلى عدة لغات، **عدّل أي ترجمة بيدك أو اكتبها بنفسك**، ثم ابحث بها. "
-        "كل لغة تُبحث في المقالات المنشورة بها."
+        "كل لغة تُبحث في المقالات المنشورة بها. التركية والفارسية والأمهرية تعرض ما تقوله تلك الدول بلسانها؛ تغطية GDELT لها أضعف، فإن لم تظهر نتائج فوسّع الفترة."
     )
     src_txt = st.text_input(
         "العبارة بالعربية (اتركها فارغة لاستخدام خانة البحث أعلى الصفحة)", key="ml_src",

@@ -64,6 +64,8 @@ def tr(text, src="auto", dest="ar"):
     text = (text or "").strip()
     if not text:
         return ""
+    if src == dest:
+        return text
     key = (text, src, dest)
     if key in _TR_CACHE:
         return _TR_CACHE[key]
@@ -304,7 +306,13 @@ LANGS = [
     ("hi", "الهندية", "hindi", False),
     ("zh", "الصينية", "chinese", False),
     ("ko", "الكورية", "korean", False),
+    ("ar", "العربية (صحف عربية)", "arabic", False),
+    ("tr", "التركية", "turkish", False),
+    ("fa", "الفارسية", "persian", False),
+    ("am", "الأمهرية (إثيوبيا)", "amharic", False),
 ]
+LANG_NAME_AR = {"en": "الإنجليزية", "iw": "العبرية", "ar": "العربية", "tr": "التركية", "fa": "الفارسية", "am": "الأمهرية",
+                "fr": "الفرنسية", "es": "الإسبانية", "pt": "البرتغالية", "hi": "الهندية", "zh": "الصينية", "ko": "الكورية"}
 
 
 def _minlen(code, default):
@@ -314,6 +322,8 @@ def _minlen(code, default):
 def translate_terms(terms, code):
     """يترجم كل عبارة من العربية؛ يعيد (قائمة الترجمات، هل نجحت كلها)"""
     out, ok = [], True
+    if code == "ar":
+        return [t for t in terms if t.strip()], bool(terms)
     for t in terms:
         x = tr(t, "ar", GT_CODE.get(code, code))
         if _HAS_AR.search(x):
@@ -339,8 +349,8 @@ def clean_words(x, code, min_len):
 
 def build_term(term, code, match, pre=False):
     x = term if pre else tr(term, "ar", GT_CODE.get(code, code))
-    if not pre and _HAS_AR.search(x):
-        raise TranslationError(f"تعذّرت ترجمة «{term}» إلى {'العبرية' if code == 'iw' else 'الإنجليزية'}")
+    if not pre and code != "ar" and _HAS_AR.search(x):
+        raise TranslationError(f"تعذّرت ترجمة «{term}» إلى {LANG_NAME_AR.get(code, code)}")
     if "Exact" in match:
         words = clean_words(x, code, 1)
         if not words:
@@ -561,6 +571,9 @@ def _stem(w, code):
         return w[:2]
     if code == "iw" and len(w) > 3 and w[0] == "ה":
         w = w[1:]
+    if code == "ar" and len(w) > 4 and w.startswith("ال"):
+        w = w[2:]
+    w = w.replace("\u0307", "")
     return w[:5] if len(w) > 5 else w
 
 
@@ -598,7 +611,7 @@ def make_matchers_pre(jobs):
 
 
 def find_mentions(text, matchers, joiner="AND", maxn=2):
-    low = text.lower()
+    low = text.lower().replace("\u0307", "")
     ok = [any(all(st in low for st in stems) for stems in alts) for alts in matchers]
     found = bool(ok) and (all(ok) if joiner == "AND" else any(ok))
     flat = [stems for alts in matchers for stems in alts]
@@ -832,6 +845,7 @@ def fetch_writers(writers, days, workers=6):
 _GN_LOC = {
     "en": {"US": ("en-US", "US", "US:en"), "UK": ("en-GB", "GB", "GB:en"), "IL": ("en-IL", "IL", "IL:en")},
     "he": {"IL": ("iw", "IL", "IL:he")},
+    "ar": {"EG": ("ar", "EG", "EG:ar")},
 }
 
 
@@ -877,13 +891,18 @@ def gnews_site_search(selected, days, terms=None, joiner="OR", author=None, auth
     buckets = {
         "en": _split_domains([d for _, d, lg in selected if lg in ("en", "both")]),
         "he": _split_domains([d for _, d, lg in selected if lg in ("he", "both")]),
+        "ar": _split_domains([d for _, d, lg in selected if lg == "ar"]),
     }
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     names = [n for n in (author, author_he) if n]
     for lang, doms in buckets.items():
         if not doms:
             continue
-        if lang == "he":
+        if lang == "ar":
+            if author or author_he:
+                continue  # بحث الكاتب لا يشمل الصحف العربية
+            who, code, loc = "", "ar", _GN_LOC["ar"]["EG"]
+        elif lang == "he":
             who = author_he or (tr(author, "en", "iw") if author else "")
             code, loc = "iw", _GN_LOC["he"]["IL"]
             if who and who not in names:
@@ -895,8 +914,11 @@ def gnews_site_search(selected, days, terms=None, joiner="OR", author=None, auth
                 names.append(who)
         tparts = []
         for t in terms or []:
-            x = t if (code == "en" and not _HAS_AR.search(t)) else tr(t, "ar", code)
-            if x and not _HAS_AR.search(x):
+            if code == "ar":
+                x = t if _HAS_AR.search(t) else tr(t, "en", "ar")
+            else:
+                x = t if (code == "en" and not _HAS_AR.search(t)) else tr(t, "ar", code)
+            if x and (code == "ar" or not _HAS_AR.search(x)):
                 tparts.append(_quoted(x))
         if terms and not tparts:
             notes.append(f"تعذّرت ترجمة الكلمات إلى {'العبرية' if code == 'iw' else 'الإنجليزية'} — تخطّيتُ هذه اللغة")
@@ -929,7 +951,7 @@ def gnews_site_search(selected, days, terms=None, joiner="OR", author=None, auth
                 a = {
                     "url": e["link"], "title": title, "seendate": e["date"].strftime("%Y%m%dT%H%M%SZ"),
                     "domain": host, "sourcecountry": COUNTRY_EN.get(loc_c, ""),
-                    "language": "Hebrew" if lang == "he" else "English",
+                    "language": {"he": "Hebrew", "ar": "Arabic"}.get(lang, "English"),
                 }
                 if author or author_he:
                     a.update({"writer": author or who, "writer_en": author or who,
