@@ -442,6 +442,9 @@ if "view" in st.query_params:
 # ───────────────────────── التخزين: المحفوظات + المصادر المضافة ─────────────────────────
 
 DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9\-\.]*\.[a-z]{2,}$")
+# فواصل العبارات: , ، ; سطر جديد، وكذلك النقطة بعد حرف عربي (مثل: مصر. الجيش المصري.) دون المساس بالاختصارات الإنجليزية
+TERM_SPLIT = re.compile(r"[,،;\n]+|(?<=[\u0600-\u06FF])\.+(?=\s|$)")
+
 
 
 def _secret(name):
@@ -803,7 +806,7 @@ def update_meta(data, sel):
 
 
 def do_search(key, jobs, sel=None, terms=None, pre=False, seed=None):
-    terms = terms or [t.strip() for t in re.split(r"[,،;\n]+", query) if t.strip()]
+    terms = terms or [t.strip() for t in TERM_SPLIT.split(query) if t.strip()]
     if not terms:
         st.warning("اكتب كلمة بحث أولاً (في الخانة أعلى الصفحة).")
         return
@@ -1080,7 +1083,7 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
         with_terms = only_conf = False
         use_gn = st.checkbox("➕ ضمّ نتائج أخبار Google إلى GDELT (يغطي ما يفوته GDELT)", value=True, key=f"{key}_gn")
     if st.button(btn_label, type="primary", use_container_width=True, key=f"go_{key}"):
-        terms = [t.strip() for t in re.split(r"[,،;\n]+", query) if t.strip()]
+        terms = [t.strip() for t in TERM_SPLIT.split(query) if t.strip()]
         if author_raw.strip():
             if with_terms and not terms:
                 st.warning("اكتب كلمة البحث أعلى الصفحة أو ألغِ التقييد بها.")
@@ -1164,7 +1167,7 @@ with tab_br:
         bdays = st.selectbox("الفترة", list(DAY_OPTS.keys()), index=1, key="br_days")
         use_kw = st.checkbox("اقتصر على كلمة البحث أعلى الصفحة (اتركه فارغاً لعرض كل العناوين)", value=False, key="br_kw")
         if st.button("اعرض العناوين", type="primary", use_container_width=True, key="go_br2"):
-            kw = [t.strip() for t in re.split(r"[,،;\n]+", query) if t.strip()] if use_kw else None
+            kw = [t.strip() for t in TERM_SPLIT.split(query) if t.strip()] if use_kw else None
             sel_b = [pool_all[n] for n in chosen_src]
             if not sel_b:
                 st.warning("اختر مصدراً واحداً على الأقل.")
@@ -1317,7 +1320,7 @@ with tab_in:
         ar_sel = st.multiselect("الصحف العربية", ar_pool, default=ar_pool[:5] + ["الشرق الأوسط", "العربية", "الجزيرة"], key="in_ar_sel")
         st.caption("تُترجم كلمات البحث تلقائياً إلى العربية. بحث اسم الكاتب لا يشمل الصحف العربية.")
     if st.button("🛰️ ابحث / اعرض", type="primary", use_container_width=True, key="go_in"):
-        tl = [t.strip() for t in re.split(r"[,،;\n]+", terms_txt) if t.strip()]
+        tl = [t.strip() for t in TERM_SPLIT.split(terms_txt) if t.strip()]
         if qmode.startswith("🔎") and not tl:
             st.warning("اكتب كلمات البحث أو اختر «اعرض كل ما نُشر».")
         elif not picked:
@@ -1383,7 +1386,7 @@ with tab_ml:
         "العبارة بالعربية (اتركها فارغة لاستخدام خانة البحث أعلى الصفحة)", key="ml_src",
         help="افصل بين المواضيع بفاصلة.",
     )
-    base_terms = [x.strip() for x in re.split(r"[,،;\n]+", src_txt or query) if x.strip()]
+    base_terms = [x.strip() for x in TERM_SPLIT.split(src_txt or query) if x.strip()]
     if st.button("🔤 ترجم إلى اللغات المختارة", use_container_width=True, key="ml_tr"):
         if not base_terms:
             st.warning("اكتب كلمة أو جملة بالعربية أولاً.")
@@ -1403,7 +1406,7 @@ with tab_ml:
         if st.session_state.get(f"ml_fail_{code}"):
             c2_.caption("⚠️ فشلت الترجمة الآلية — اكتبها بنفسك.")
         if use and txt.strip():
-            chosen.append((code, gl, [x.strip() for x in re.split(r"[,،;\n]+", txt) if x.strip()]))
+            chosen.append((code, gl, [x.strip() for x in TERM_SPLIT.split(txt) if x.strip()]))
     country_label = st.selectbox("حصر في مصادر بلد معيّن (اختياري)", list(COUNTRIES.keys()), key="ml_country")
     if st.button("ابحث بهذه الترجمات", type="primary", use_container_width=True, key="go_ml"):
         cc = COUNTRIES[country_label]
@@ -1463,7 +1466,7 @@ with tab_wr:
                     tuple(sorted(sel_ids)), DAY_OPTS[days_label], json.dumps(S()["writers"], ensure_ascii=False, sort_keys=True)
                 )
                 items = [dict(a) for a in items]
-            kw_terms = [t_.strip() for t_ in re.split(r"[,،;\n]+", query) if t_.strip()]
+            kw_terms = [t_.strip() for t_ in TERM_SPLIT.split(query) if t_.strip()]
             if use_ctype and ctype != "الكل":
                 items = [a for a in items if a.get("ctype") == ctype]
             matchers = []
