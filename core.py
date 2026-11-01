@@ -411,11 +411,45 @@ def clean_words(x, code, min_len):
     return out
 
 
+_AC_PATTERNS = [
+    (re.compile(r"(?<![\w\u0600-\u06FF])(?:سوخوي|سوخوى|سو)\s*[-‐]?\s*(\d{2})\b"), "Su",
+     lambda n: [f"Su-{n}", f"Su{n}", f"Su {n}", f"סו-{n}", f"סוחוי {n}", f"Sukhoi {n}", f"سو-{n}", f"سوخوي {n}"]),
+    (re.compile(r"(?<![\w\u0600-\u06FF])(?:اف|إف|أف|f)\s*[-‐]?\s*(\d{1,2})\b", re.I), "F",
+     lambda n: [f"F-{n}", f"F{n}", f"F {n}", f"אף-{n}", f"אף {n}", f"إف-{n}", f"إف {n}"]),
+]
+
+
+def term_extras(term, code):
+    """صيغ كتابة بديلة لأسماء الطائرات (Su-35 / F-16): تُكتب بحروف لاتينية أو بأشكال مختلفة في العناوين"""
+    out = []
+    for rx, _k, mk in _AC_PATTERNS:
+        m = rx.search(term or "")
+        if not m:
+            continue
+        for v in mk(m.group(1)):
+            heb = bool(re.search(r"[\u0590-\u05FF]", v))
+            ar = bool(_HAS_AR.search(v))
+            if (heb and code != "iw") or (ar and code != "ar"):
+                continue
+            if v not in out:
+                out.append(v)
+    return out
+
+
 def _tidy_term(t):
     return " ".join(re.sub(r"[()\[\]{}\"“”„«»]", " ", t or "").split())
 
 
 def build_term(term, code, match, pre=False):
+    base = _build_term(term, code, match, pre)
+    extras = [] if pre else term_extras(term, code)
+    if base and extras:
+        alts = [f'"{v}"' for v in extras if f'"{v}"' != base]
+        return "(" + " OR ".join([base] + alts) + ")"
+    return base
+
+
+def _build_term(term, code, match, pre=False):
     if not pre:
         term = _tidy_term(term) or term
     x = term if pre else tr(term, "ar", GT_CODE.get(code, code))
@@ -712,6 +746,9 @@ def make_matchers(terms, codes):
             stems = [_stem(w, code) for w in words]
             if stems:
                 alts.append(stems)
+            for v in term_extras(t, code):  # صيغ بديلة بلا مسافات (Su-35 / F-16 ...)
+                if " " not in v:
+                    alts.append([v.lower()])
         if alts:
             out.append(alts)
     return out
@@ -1045,7 +1082,8 @@ def gnews_site_search(selected, days, terms=None, joiner="OR", author=None, auth
             else:
                 x = t if (code == "en" and not _HAS_AR.search(t)) else tr(t, "ar" if _HAS_AR.search(t) else "en", code)
             if x and (code in ("ar", "fa") or not _HAS_AR.search(x)):
-                tparts.append(_quoted(x))
+                ex = term_extras(t, code)
+                tparts.append("(" + " OR ".join([_quoted(x)] + [_quoted(v) for v in ex if v != x]) + ")" if ex else _quoted(x))
         if terms and not tparts:
             notes.append(f"تعذّرت ترجمة الكلمات إلى {LANG_NAME_AR.get(code, code)} — تخطّيتُ هذه اللغة")
             continue

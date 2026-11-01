@@ -1039,6 +1039,39 @@ def author_search(key, sel, country, author_raw, he_raw, only_confirmed, with_te
     update_meta(data, sel)
 
 
+def body_search(key, sel, terms, gn_country, n):
+    """بحث في نص المقالات: يجمع أحدث عناوين المصادر (من مواقعها ثم أخبار Google) ويقرأ نص كل مقال ويُبقي ما ذُكرت فيه كلماتك"""
+    bar = st.progress(0.0, text="جارٍ جمع أحدث مقالات المصادر…")
+    d_items, d_notes = core.direct_headlines(sel, days_in_range())
+    g_items, g_notes = core.gnews_site_search(sel, days_in_range(), terms=None, joiner=joiner, country=gn_country, max_items=200)
+    pool = core.merge_items(d_items, g_items)
+    if ctype != "الكل":
+        pool = [a for a in pool if a.get("ctype") == ctype]
+    pool = pool[:n]
+    matchers = core.make_matchers(terms, core.codes_for(sel))
+    hl = sorted({st_ for alts in matchers for stems in alts for st_ in stems}, key=len, reverse=True)
+    for i in range(0, len(pool), 8):
+        bar.progress(min(1.0, i / max(1, len(pool))), text=f"🔬 جارٍ قراءة نصوص المقالات… ({i}/{len(pool)})")
+        core.enrich_items(pool[i:i + 8], matchers, joiner, limit=8)
+    bar.empty()
+    hits = [a for a in pool if a.get("found")]
+    unread = sum(1 for a in pool if a.get("checked") and not a.get("fetched"))
+    core.translate_titles(hits)
+    note = f"بحث النص ⟵ قُرئ {len(pool) - unread} مقالاً من {len(pool)} ⟵ وُجدت الكلمات في {len(hits)}" + (f" ⟵ تعذّر فتح {unread} (حجب أو اشتراك)" if unread else "")
+    data = st.session_state.get(f"res_{key}") or {"items": [], "errors": [], "used": [], "summaries": {}, "counts": {}, "silent": [], "hidden": 0, "hl": []}
+    have = {x["url"] for x in data["items"]}
+    data["items"] = sorted(data["items"] + [a for a in hits if a["url"] not in have], key=lambda a: a.get("seendate", ""), reverse=True)
+    data["used"] = list(data.get("used", [])) + d_notes + [note]
+    data["hl"] = sorted(set(data.get("hl", [])) | set(hl), key=len, reverse=True)
+    data["partial"] = False
+    st.session_state[f"res_{key}"] = data
+    update_meta(data, sel)
+    if hits:
+        st.success(f"🔬 لقيت {len(hits)} مقال بيذكر كلمتك داخل النص (من {len(pool) - unread} مقال اتقرا).")
+    else:
+        st.info(f"🔬 قرأت {len(pool) - unread} مقال ومالقيتش كلمتك في نصوصهم." + (f" وتعذّر فتح {unread}." if unread else ""))
+
+
 def curated_tab(key, groups, gd_country, gn_country, btn_label):
     sel = pick_sources(key, groups)
     pool = all_entries(key, groups)
@@ -1082,6 +1115,8 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
     else:
         with_terms = only_conf = False
         use_gn = st.checkbox("➕ ضمّ نتائج أخبار Google إلى GDELT (يغطي ما يفوته GDELT)", value=True, key=f"{key}_gn")
+        use_body = st.checkbox("🔬 ابحث كمان داخل نص المقالات (يقرا أحدث مقالات المصدر ويدوّر فيها؛ أبطأ بس بيلقط اللي كلمتك في وسطه)", value=False, key=f"{key}_body")
+        body_n = st.slider("عدد المقالات اللي هتتقرا", 20, 120, 60, 10, key=f"{key}_bn") if use_body else 0
     if st.button(btn_label, type="primary", use_container_width=True, key=f"go_{key}"):
         terms = [t.strip() for t in TERM_SPLIT.split(query) if t.strip()]
         if author_raw.strip():
@@ -1102,6 +1137,10 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
             do_search(key, core.jobs_for_sources(sel, gd_country), sel, seed=seed)
             if gnotes and st.session_state.get(f"res_{key}"):
                 st.session_state[f"res_{key}"]["used"] += gnotes
+            if use_body and sel and terms:
+                body_search(key, sel, terms, gn_country, body_n)
+            elif use_body and not terms:
+                st.warning("اكتب كلمة بحث أعلى الصفحة عشان البحث داخل النص.")
     render_results(key)
 
 
