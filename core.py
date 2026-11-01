@@ -1167,6 +1167,110 @@ def browse_section(url, domains, limit=80):
     return out[:limit], ("" if out else "لم أجد روابط مقالات واضحة في الصفحة (قد تُحمَّل بالجافاسكربت).")
 
 
+_FEED_LINK = re.compile(r'<link[^>]+type=["\']application/(?:rss|atom)\+xml["\'][^>]*>', re.I)
+_FEED_PATHS = ("/feed", "/feed/", "/rss", "/rss.xml", "/rss/", "/feeds/all.rss.xml", "/atom.xml", "/index.xml", "/?feed=rss2")
+
+
+def _site_feed_items(host, days, lang_label):
+    """يقرأ آخر العناوين من موقع المصدر نفسه: خلاصة RSS/Atom (مكتشفة من الصفحة أو شائعة)، وإلا روابط الصفحة الرئيسية.
+    يعيد (items, ملاحظة)"""
+    base = f"https://{host}"
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cands, home_html = [], ""
+    try:
+        r = requests.get(base + "/", headers=BROWSER_HEADERS, timeout=12)
+        if r.ok:
+            home_html = r.text[:600000]
+            for tag in _FEED_LINK.findall(home_html):
+                m = re.search(r'href=["\']([^"\']+)', tag)
+                if m:
+                    cands.append(urljoin(r.url, _html.unescape(m.group(1))))
+    except Exception:
+        pass
+    cands += [base + x for x in _FEED_PATHS]
+    seen_c, feed_items, used = set(), [], ""
+    for u in cands:
+        if u in seen_c or len(seen_c) >= 8 or not is_safe_url(u):
+            continue
+        seen_c.add(u)
+        try:
+            rr = requests.get(u, headers=BROWSER_HEADERS, timeout=12)
+            if not rr.ok or len(rr.content) > 5_000_000:
+                continue
+            got = parse_feed(rr.content)
+        except Exception:
+            continue
+        if got:
+            feed_items, used = got, u
+            break
+    items = []
+    for e in feed_items:
+        if not e["link"] or not e["title"]:
+            continue
+        if e["date"] and e["date"] < cutoff:
+            continue
+        items.append({"url": e["link"], "title": _html.unescape(e["title"]),
+                      "seendate": e["date"].strftime("%Y%m%dT%H%M%SZ") if e["date"] else "",
+                      "domain": _host(e["link"]) or host, "sourcecountry": "", "language": lang_label})
+    if items:
+        return items, f"مباشر من الموقع ⟵ {host} ⟵ {len(items)} (خلاصة RSS)"
+    if home_html:
+        got, _err = browse_section(base + "/", [host], limit=60)
+        for a in got:
+            a["language"] = lang_label
+        if got:
+            return got, f"مباشر من الموقع ⟵ {host} ⟵ {len(got)} (الصفحة الرئيسية، بلا تاريخ)"
+    return [], f"مباشر من الموقع ⟵ {host} ⟵ تعذّر (الموقع يحجب أو لا يوفّر خلاصة)"
+
+
+def direct_headlines(selected, days, max_items=300):
+    """أحدث عناوين المصادر المختارة من مواقعها مباشرة. selected: (label, domains, lang). يعيد (items, notes)"""
+    jobs = []
+    for _lbl, doms, lg in selected:
+        ls = entry_langs(lg) or ["en"]
+        lab = {"he": "Hebrew", "ar": "Arabic", "tr": "Turkish", "fa": "Persian", "am": "Amharic"}.get(ls[0], "English")
+        for d in _split_domains([doms]):
+            host = d.split("/")[0]
+            if host and (host, lab) not in jobs:
+                jobs.append((host, lab))
+
+    def work(j):
+        try:
+            return _site_feed_items(j[0], days, j[1])
+        except Exception as ex:
+            return [], f"مباشر من الموقع ⟵ {j[0]} ⟵ تعذّر ({type(ex).__name__})"
+
+    items, notes = [], []
+    with ThreadPoolExecutor(8) as ex:
+        for its, note in ex.map(work, jobs):
+            items += its
+            notes.append(note)
+    seen, uniq = set(), []
+    for a in sorted(items, key=lambda a: a["seendate"], reverse=True):
+        k = a["url"].split("?")[0].rstrip("/")
+        if k in seen:
+            continue
+        seen.add(k)
+        a["ctype"], a["ctype_sure"] = classify(a["url"], a["title"])
+        uniq.append(a)
+    return uniq[:max_items], notes
+
+
+def merge_items(*lists):
+    """يدمج قوائم عناوين بلا تكرار (بالرابط أو بالعنوان) ويرتبها من الأحدث"""
+    seen_u, seen_t, out = set(), set(), []
+    for lst in lists:
+        for a in lst:
+            u = a["url"].split("?")[0].rstrip("/")
+            t = re.sub(r"\W+", "", a["title"].lower())[:80]
+            if u in seen_u or (t and t in seen_t):
+                continue
+            seen_u.add(u)
+            seen_t.add(t)
+            out.append(a)
+    return sorted(out, key=lambda a: a.get("seendate", ""), reverse=True)
+
+
 # ───────────────────────── تحليل رابط (خبر أو تغريدة) لإضافة مصدر/كاتب ─────────────────────────
 
 TW_HOSTS = {"twitter.com", "x.com", "mobile.twitter.com", "t.co"}

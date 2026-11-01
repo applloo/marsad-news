@@ -1045,6 +1045,27 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
         one = st.selectbox("اختر المصدر الذي تبحث بداخله", names, key=f"{key}_one")
         sel = [e for e in pool if e[0] == one][:1]
         st.caption("سيُبحث عن كلمتك داخل هذا الموقع وحده (عبر GDELT وأخبار Google معاً). المصادر التي أضفتَها من رابط تظهر أيضاً في القائمة.")
+    qm = st.radio("طريقة البحث", ["🔎 بكلمة البحث (أعلى الصفحة)", "📰 اعرض كل ما نُشر (بدون كلمات)"], horizontal=True, key=f"{key}_qm")
+    if qm.startswith("📰"):
+        st.caption("هيقرا عناوين المصادر اللي اخترتها (أو المصدر الواحد) من مواقعها مباشرة (خلاصة RSS أو الصفحة الرئيسية)، ويكمّلها من أخبار Google، خلال الفترة المحددة أعلى الصفحة، من غير ما تكتب كلمة. "
+                   f"عدد المصادر دلوقتي: {len(sel)}.")
+        if st.button("📰 اعرض كل ما نُشر", type="primary", use_container_width=True, key=f"goall_{key}"):
+            if not sel:
+                st.warning("اختر مصدراً واحداً على الأقل.")
+            else:
+                with st.spinner(f"جارٍ قراءة عناوين {len(sel)} مصدراً من مواقعها مباشرة ثم تكميلها من أخبار Google…"):
+                    d_items, d_notes = core.direct_headlines(sel, days_in_range())
+                    g_items, g_notes = core.gnews_site_search(sel, days_in_range(), terms=None, joiner=joiner, country=gn_country, max_items=200)
+                    items, notes = core.merge_items(d_items, g_items), d_notes + g_notes
+                    if ctype != "الكل":
+                        items = [a for a in items if a.get("ctype") == ctype]
+                    core.translate_titles(items)
+                dd = {"items": items, "errors": [] if items else ["لم تُرجع أخبار Google عناوين لهذه المصادر في الفترة. وسّع الفترة أو غيّر المصادر."],
+                      "used": notes, "summaries": {}, "counts": {}, "silent": [], "hidden": 0, "hl": []}
+                st.session_state[f"res_{key}"] = dd
+                update_meta(dd, sel)
+        render_results(key)
+        return
     c1_, c2_ = st.columns(2)
     author_raw = c1_.text_input(
         "✍️ اسم كاتب أو مراسل (اختياري)", key=f"{key}_author",
