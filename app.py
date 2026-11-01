@@ -228,6 +228,32 @@ def alt_block(title, url):
                     f"[Google](https://www.google.com/search?q={qq}) · [Bing أخبار](https://www.bing.com/news/search?q={qq})")
 
 
+def translate_proxy_url(url, tl="ar"):
+    """رابط نسخة مترجمة من الصفحة عبر ترجمة جوجل (translate.goog)"""
+    from urllib.parse import urlsplit
+    s = urlsplit(url)
+    host = (s.hostname or "").replace("-", "--").replace(".", "-")
+    q = (s.query + "&" if s.query else "") + f"_x_tr_sl=auto&_x_tr_tl={tl}&_x_tr_hl={tl}&_x_tr_pto=wapp"
+    return f"https://{host}.translate.goog{s.path or '/'}?{q}"
+
+
+def embed_browser(url):
+    """متصفح صغير داخل الصفحة: يفتح الرابط الأصلي أو نسخته المترجمة للعربية"""
+    import streamlit.components.v1 as components
+    with st.expander("🌐 افتح الصفحة الأصلية هنا (متصفح صغير) مع ترجمة", expanded=True):
+        mode = st.radio("العرض", ["مترجمة للعربية", "الأصلية بلغتها"], horizontal=True, key="emb_mode")
+        src = translate_proxy_url(url) if mode.startswith("مترجمة") else url
+        h = st.select_slider("ارتفاع الإطار", [500, 700, 900, 1200], value=700, key="emb_h")
+        components.html(
+            f"<iframe src='{html.escape(src, quote=True)}' style='width:100%;height:{h-10}px;border:1px solid #334155;border-radius:8px;background:#fff' "
+            "referrerpolicy='no-referrer' loading='lazy'></iframe>", height=h, scrolling=False)
+        st.caption("لو الإطار طلع فاضي أو فيه رسالة خطأ، يبقى الموقع (أو جوجل) مانع العرض داخل صفحات تانية. "
+                   "جرّب الزرارين تحت، بيفتحوا في تاب جديد.")
+        c1, c2 = st.columns(2)
+        c1.link_button("↗️ الأصلية في تاب جديد", url, use_container_width=True)
+        c2.link_button("↗️ المترجمة في تاب جديد", translate_proxy_url(url), use_container_width=True)
+
+
 def reader_page():
     url = unquote(st.query_params.get("view", ""))
     seen = st.query_params.get("seen", "")
@@ -239,6 +265,8 @@ def reader_page():
         return
     st.markdown(f"🔗 **الرابط الأصلي:** [{html.escape(url)}]({url})")
     st.markdown(f"<div class='meta'>🌐 المصدر: {src_label(core._host(url))}</div>", unsafe_allow_html=True)
+
+    embed_browser(url)
 
     with st.spinner("جارٍ جلب المقال وترجمته…"):
         art = core.fetch_article(url)
