@@ -614,16 +614,52 @@ def run_search(terms, joiner, match, jobs, start_utc, end_utc, max_rec, ctype, p
     return (last["items"] or []), last["errors"], last["used"]
 
 
-def translate_titles(items):
-    def work(a):
-        title = a.get("title", "")
-        a["title_ar"] = tr(title, "auto", "ar")
-        a["title_en"] = title if a.get("language", "").lower() == "english" else tr(title, "auto", "en")
-        a["country_ar"] = tr(a.get("sourcecountry", ""), "en", "ar") if a.get("sourcecountry") else ""
-        return a
+def _batch_tr(texts, dest, size=12):
+    """يترجم عدة عناوين بطلب واحد لكل دفعة (يوفّر الطلبات فلا يحجبنا جوجل). يعيد قائمة بنفس الترتيب، والفاشل يبقى كما هو"""
+    out = list(texts)
+    for i in range(0, len(texts), size):
+        chunk = [" ".join(t.split()) for t in texts[i:i + size]]
+        res = tr("\n".join(chunk), "auto", dest).split("\n")
+        if len(res) == len(chunk):
+            for j, r in enumerate(res):
+                if r.strip():
+                    out[i + j] = r.strip()
+        else:  # اختلف عدد الأسطر: ترجمة فردية متتابعة
+            for j, t in enumerate(chunk):
+                out[i + j] = tr(t, "auto", dest)
+    return out
 
-    with ThreadPoolExecutor(6) as ex:
-        return list(ex.map(work, items))
+
+def translate_titles(items):
+    """يضيف title_ar وtitle_en وcountry_ar. دفعات أولاً ثم إعادة محاولة هادئة لما لم يُترجم"""
+    items = list(items)
+    if not items:
+        return items
+    titles = [a.get("title", "") for a in items]
+    ar = _batch_tr(titles, "ar")
+    for _ in range(2):  # إعادة محاولة بطيئة لما بقي كما هو (غير عربي أصلاً)
+        bad = [i for i, a in enumerate(items) if ar[i] == titles[i] and not _HAS_AR.search(titles[i]) and titles[i].strip()]
+        if not bad:
+            break
+        time.sleep(1.5)
+        for i in bad:
+            ar[i] = tr(titles[i], "auto", "ar")
+    foreign = [i for i, a in enumerate(items) if a.get("language", "").lower() != "english"]
+    en = {i: titles[i] for i in range(len(items))}
+    if foreign:
+        for i, v in zip(foreign, _batch_tr([titles[i] for i in foreign], "en")):
+            en[i] = v
+    cache = {}
+    for i, a in enumerate(items):
+        a["title_ar"], a["title_en"] = ar[i], en[i]
+        sc = a.get("sourcecountry", "")
+        if sc:
+            if sc not in cache:
+                cache[sc] = tr(sc, "en", "ar")
+            a["country_ar"] = cache[sc]
+        else:
+            a["country_ar"] = ""
+    return items
 
 
 # ───────────────────────── التحقق من نص المقال ─────────────────────────
