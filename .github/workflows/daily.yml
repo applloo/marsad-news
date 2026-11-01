@@ -1,0 +1,19 @@
+name: التقرير اليومي
+on:
+  schedule:
+    - cron: "0 4 * * *"   # 04:00 UTC = 06:00 بتوقيت القاهرة (الشتوي)
+  workflow_dispatch: {}    # زر «Run workflow» للتشغيل اليدوي
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests deep-translator trafilatura
+      - run: python daily.py
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: ${{ secrets.GIST_ID }}
