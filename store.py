@@ -10,7 +10,7 @@ API = "https://api.github.com/gists/"
 
 
 def empty():
-    return {"saved": [], "sources": [], "writers": []}
+    return {"saved": [], "sources": [], "writers": [], "keys": []}
 
 
 def normalize(data):
@@ -56,4 +56,5 @@ def merge(base, extra):
     base["sources"] += [x for x in extra["sources"] if (x.get("domain"), x.get("group")) not in seen]
     seen = {x.get("id") for x in base["writers"]}
     base["writers"] += [x for x in extra["writers"] if x.get("id") not in seen]
+    # الشفرات لا تُدمج من النسخ الاحتياطية (تبقى كما هي في الـGist)
     return base

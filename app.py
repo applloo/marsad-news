@@ -15,13 +15,16 @@ import streamlit as st
 import core
 import intel
 from core import fmt_seen, tr
+import hmac
+import keys as keys_mod
 import store
+import time
 import writers as writers_mod
-from sources import ARABIC, EGYPT_ARABIC, ISRAEL, SECTIONS, UK, USA
+from sources import ARABIC, EGYPT_ARABIC, ISRAEL, REGION, SECTIONS, UK, USA
 from writers import WRITERS
 
 DOMAIN_LABELS = {}
-for _g in (ISRAEL, USA, UK):
+for _g in (ISRAEL, USA, UK, REGION):
     for _entries in _g.values():
         for _label, _doms, _ in _entries:
             for _d in _doms.split("|"):
@@ -152,7 +155,7 @@ def alt_block(title, url):
         return
     st.caption(f"{note} هذه مقالات من مواقع أخرى عن الموضوع نفسه (قد تختلف في الزاوية والتفاصيل عن المقال المغلق).")
     for a in items:
-        lnk = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a['title'][:200], safe='')}"
+        lnk = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a['title'][:200], safe='')}{auth_qs()}"
         st.markdown(
             f"<div class='card'><div class='ar-title'>{html.escape(a.get('title_ar', ''))}</div>"
             f"<div class='ltr' dir='ltr'>{html.escape(a['title'])}</div>"
@@ -232,6 +235,92 @@ def reader_page():
         alt_block(title, url)
 
 
+
+# ───────────────────────── بوابة الشفرات (اختيارية: تعمل فقط إن وُجد ADMIN_KEY في Secrets) ─────────────────────────
+
+def _sec(name):
+    try:
+        v = st.secrets.get(name)
+    except Exception:
+        v = None
+    return v or os.getenv(name)
+
+
+ADMIN_KEY, _GT, _GG = _sec("ADMIN_KEY"), _sec("GITHUB_TOKEN"), _sec("GIST_ID")
+GATE_ON = bool(ADMIN_KEY and _GT and _GG)
+
+
+def auth_qs():
+    """يُلحق الشفرة بروابط صفحة القراءة (تُفتح في تبويب جديد = جلسة جديدة)"""
+    a = st.session_state.get("auth") or {}
+    return f"&k={quote(a['token'], safe='')}" if a.get("token") else ""
+
+
+def _try_code(code):
+    """يحاول الدخول بالشفرة؛ يعيد رسالة الخطأ أو '' عند النجاح"""
+    code = (code or "").strip()
+    if not code:
+        return ""
+    if hmac.compare_digest(code, ADMIN_KEY):
+        st.session_state["auth"] = {"role": "admin", "token": ADMIN_KEY}
+        return ""
+    try:
+        k, why = keys_mod.touch(_GT, _GG, code)
+    except Exception as e:
+        return f"تعذّر التحقق الآن ({type(e).__name__}). أعد المحاولة بعد لحظات."
+    if not k:
+        return why
+    st.session_state["auth"] = {"role": "guest", "token": keys_mod.norm(code), "label": k.get("label", ""),
+                                "exp": keys_mod.iso(keys_mod.expires_at(k)), "checked": time.time()}
+    return ""
+
+
+def gate():
+    ss = st.session_state
+    if not GATE_ON:
+        ss["auth"] = {"role": "admin", "token": ""}
+        return
+    a = ss.get("auth")
+    msg = ""
+    if a and a["role"] == "guest":
+        exp = keys_mod.parse(a.get("exp"))
+        if exp and keys_mod.now() > exp:
+            ss.pop("auth")
+            a, msg = None, "انتهت مدة التجربة."
+        elif time.time() - a["checked"] > keys_mod.RECHECK_SECONDS:
+            try:
+                ok = keys_mod.recheck(_GT, _GG, a["token"])
+            except Exception:
+                ok = True  # تعذّر الفحص مؤقتاً: لا نطرد الضيف
+            a["checked"] = time.time()
+            if not ok:
+                ss.pop("auth")
+                a, msg = None, "أُلغيت هذه الشفرة أو انتهت مدتها."
+    if a:
+        return
+    code = st.query_params.get("k", "")
+    if code and not ss.get("k_tried") == code:
+        ss["k_tried"] = code
+        msg = _try_code(code) or msg
+        if ss.get("auth"):
+            return
+    st.title("🔒 رادار الأخبار العالمية")
+    st.markdown("هذه النسخة بالدعوة فقط. اكتب الشفرة التي وصلتك مع الرابط.")
+    if msg:
+        st.error(msg)
+    entered = st.text_input("الشفرة", key="gate_code", type="password", placeholder="MR-XXXX-XXXX")
+    if st.button("دخول", type="primary"):
+        err = _try_code(entered)
+        if err:
+            st.error(err)
+        else:
+            st.rerun()
+    st.stop()
+
+
+gate()
+IS_ADMIN = st.session_state["auth"]["role"] == "admin"
+
 if "view" in st.query_params:
     reader_page()
     st.stop()
@@ -250,7 +339,7 @@ def _secret(name):
 
 
 GH_TOKEN, GH_GIST = _secret("GITHUB_TOKEN"), _secret("GIST_ID")
-PERSIST = bool(GH_TOKEN and GH_GIST)
+PERSIST = bool(GH_TOKEN and GH_GIST) and IS_ADMIN  # الضيف لا يرى بيانات المالك ولا يكتب فيها
 
 if "store" not in st.session_state:
     _data, _err = store.empty(), None
@@ -271,6 +360,8 @@ def persist():
     if not PERSIST:
         return
     try:
+        fresh = store.load(GH_TOKEN, GH_GIST)  # حتى لا نمحو شفرات أُنشئت أو دخولات سُجّلت من جلسة أخرى
+        S()["keys"] = fresh["keys"]
         store.save(GH_TOKEN, GH_GIST, S())
         st.session_state["store_err"] = None
     except Exception as e:
@@ -324,8 +415,8 @@ def add_source():
         return flash("⚠️ الدومين غير صالح (مثال: example.com).")
     name = (ss.get("ms_name", "") or "").strip() or dom
     gname = ss.get("ms_group", "أمريكية")
-    group = {"إسرائيلية": "il", "أمريكية": "us", "بريطانية": "uk"}[gname]
-    lang = {"عبري": "he", "إنجليزي": "en", "كلاهما": "both"}[ss.get("ms_lang", "إنجليزي")]
+    group = {"إسرائيلية": "il", "أمريكية": "us", "بريطانية": "uk", "تركيا/إيران/إثيوبيا": "rg"}[gname]
+    lang = {"عبري": "he", "إنجليزي": "en", "كلاهما": "both", "تركي": "tr", "فارسي": "fa", "أمهري": "am", "عربي": "ar"}[ss.get("ms_lang", "إنجليزي")]
     if any(x["domain"] == dom and x["group"] == group for x in S()["sources"]):
         return flash("هذا المصدر مضاف مسبقاً.")
     S()["sources"].append({"label": name, "domain": dom, "lang": lang, "group": group})
@@ -405,6 +496,11 @@ def do_analyze():
 # ───────────────────────── الواجهة الرئيسية ─────────────────────────
 
 st.title("📰 رادار الأخبار العالمية")
+if not IS_ADMIN:
+    _a = st.session_state["auth"]
+    st.info(f"🎟️ نسخة تجريبية لـ «{_a.get('label', '')}» — "
+            f"تنتهي {keys_mod.parse(_a['exp']).astimezone(core.TZ).strftime('%Y-%m-%d %H:%M')} بتوقيت القاهرة. "
+            "لا يُحفظ شيء بعد إغلاق الصفحة.")
 st.caption("اكتب بالعربية كلمة أو عدة كلمات أو جملة مركّبة — تُترجم تلقائياً إلى العبرية والإنجليزية وتُترجم النتائج للعربية.")
 
 query = st.text_input(
@@ -450,6 +546,7 @@ with st.expander("🎧 إعدادات القراءة الصوتية (للمتر�
     st.caption("تُجهَّز القراءة بصوت عربي عصبي، ويمكن تنزيلها MP3 قبل نزول المترو للاستماع بلا إنترنت.")
 
 def pick_sources(key, groups, allow_custom=True):
+    custom_lang = "en" if key == "rg" else "both"
     """يعرض اختيار المصادر ويعيد قائمة (label, domains, lang)"""
     chosen = []
     extra_src = [(x["label"], x["domain"], x["lang"]) for x in S()["sources"] if x["group"] == key]
@@ -466,7 +563,7 @@ def pick_sources(key, groups, allow_custom=True):
         for dmn in re.split(r"[,\s]+", extra.strip().lower()):
             dmn = dmn.replace("https://", "").replace("http://", "").replace("www.", "").strip("/")
             if dmn and DOMAIN_RE.match(dmn):
-                chosen.append((dmn, dmn, "both"))
+                chosen.append((dmn, dmn, custom_lang))
     return chosen
 
 
@@ -542,7 +639,7 @@ def highlight(text, stems):
 
 def card_html(a):
     url = a.get("url", "")
-    link = f"?view={quote(url, safe='')}&seen={a.get('seendate', '')}&t={quote(a.get('title', '')[:200], safe='')}"
+    link = f"?view={quote(url, safe='')}&seen={a.get('seendate', '')}&t={quote(a.get('title', '')[:200], safe='')}{auth_qs()}"
     orig = html.escape(a.get("title", ""))
     en = a.get("title_en", "")
     en_line = f"<div class='ltr' dir='ltr'>EN: {html.escape(en)}</div>" if en and en != a.get("title") else ""
@@ -633,8 +730,8 @@ def render_results(key):
                 st.button("💾 حفظ للقراءة لاحقاً", key=f"save_{key}_{i}", on_click=save_item, args=(a, key))
 
 
-tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_br, tab_in, tab_gd, tab_sv, tab_ms = st.tabs(
-    ["✍️ كتّاب ومحللون", "🔤 ترجمة ثم بحث", "🇮🇱 إسرائيلية (عبري)", "🇺🇸 أمريكية", "🇬🇧 بريطانية", "🗞️ تصفّح مصدر", "🛰️ مكتب الاستخبارات", "🌐 بحث عام GDELT",
+tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_sv, tab_ms = st.tabs(
+    ["✍️ كتّاب ومحللون", "🔤 ترجمة ثم بحث", "🇮🇱 إسرائيلية (عبري)", "🇺🇸 أمريكية", "🇬🇧 بريطانية", "🌍 تركيا وإيران وإثيوبيا", "🗞️ تصفّح مصدر", "🛰️ مكتب الاستخبارات", "🌐 بحث عام GDELT",
      "📌 المحفوظات", "⚙️ مصادري"]
 )
 
@@ -674,7 +771,7 @@ def add_gnews(key, sel, country, terms):
     if new:
         core.translate_titles(new)
         if verify:
-            matchers = core.make_matchers(terms, ["en", "iw"])
+            matchers = core.make_matchers(terms, core.codes_for(sel))
             core.enrich_items(new[:16], matchers, joiner, limit=16)
             if hide_nomatch:
                 new = [a for a in new if not (a.get("fetched") and not a.get("found"))]
@@ -773,6 +870,11 @@ with tab_uk:
     st.caption("صحف وقنوات بريطانية ومصادر متخصصة بالشرق الأوسط.")
     curated_tab("uk", UK, "UK", "UK", "ابحث في المصادر البريطانية")
 
+with tab_rg:
+    st.caption("إثيوبيا (سد النهضة والقرن الأفريقي) وتركيا (شرق المتوسط) وإيران (اليمن والخليج). يُترجم بحثك تلقائياً إلى الأمهرية "
+               "أو التركية أو الفارسية أو الإنجليزية بحسب لغة كل مصدر. اختر مصدراً واحداً أو عدة مصادر أو كلها، أو ابحث داخل مصدر واحد.")
+    curated_tab("rg", REGION, None, "US", "ابحث في مصادر تركيا وإيران وإثيوبيا")
+
 DAY_OPTS = {"آخر 24 ساعة": 1, "آخر 3 أيام": 3, "آخر 7 أيام": 7, "آخر 14 يوماً": 14, "آخر 30 يوماً": 30}
 
 
@@ -806,7 +908,7 @@ with tab_br:
     st.caption("افتح مصدراً وتصفّح أقسامه (الرأي، الأخبار…) بعناوين مترجمة للعربية؛ اضغط «ترجم المقال» على أي عنوان لقراءته مترجماً، أو احفظه. "
                "بعض المواقع المدفوعة تحجب الفتح المباشر فيُستعان بأخبار Google بدلاً منه.")
     pool_all = {}
-    for grp_key, groups in (("il", ISRAEL), ("us", USA), ("uk", UK)):
+    for grp_key, groups in (("il", ISRAEL), ("us", USA), ("uk", UK), ("rg", REGION)):
         for e in all_entries(grp_key, groups):
             pool_all[e[0]] = e
     bmode = st.radio("طريقة العرض", ["📂 أقسام موقع واحد", "📅 عناوين عدة مصادر خلال فترة"], horizontal=True, key="br_mode")
@@ -1245,8 +1347,8 @@ def render_manage():
     st.markdown("#### ➕ إضافة كمصدر إخباري")
     st.text_input("اسم المصدر", key="ms_name")
     st.text_input("الدومين (مثال: example.com)", key="ms_domain")
-    st.radio("يُضاف إلى تاب", ["إسرائيلية", "أمريكية", "بريطانية"], key="ms_group", horizontal=True)
-    st.radio("لغة المصدر", ["إنجليزي", "عبري", "كلاهما"], key="ms_lang", horizontal=True)
+    st.radio("يُضاف إلى تاب", ["إسرائيلية", "أمريكية", "بريطانية", "تركيا/إيران/إثيوبيا"], key="ms_group", horizontal=True)
+    st.radio("لغة المصدر", ["إنجليزي", "عبري", "كلاهما", "تركي", "فارسي", "أمهري", "عربي"], key="ms_lang", horizontal=True)
     st.button("➕ أضف المصدر", on_click=add_source, use_container_width=True, key="ms_add")
     st.markdown("#### ➕ إضافة ككاتب")
     st.text_input("اسم الكاتب بالإنجليزية (يُستخدم في البحث)", key="mw_en")
@@ -1272,8 +1374,61 @@ def render_manage():
         st.caption("⚠️ بدون التخزين الدائم تضيع هذه الإضافات عند تحديث الصفحة؛ نزّل نسخة احتياطية من تاب «المحفوظات».")
 
 
+def render_keys_admin():
+    st.markdown("#### 🔑 شفرات التجربة (للمالك فقط)")
+    if not GATE_ON:
+        st.info("البوابة غير مفعّلة. لتفعيلها أضف في Secrets قيمة **ADMIN_KEY** (كلمة سر طويلة تخصّك) إلى جانب GITHUB_TOKEN وGIST_ID، "
+                "ثم أعد تشغيل التطبيق. بعد التفعيل لن يفتح التطبيق إلا بشفرة، وتدخل أنت بكلمة ADMIN_KEY.")
+        return
+    base = st.text_input("رابط التطبيق", value=_sec("APP_URL") or st.session_state.get("app_url", ""),
+                         placeholder="https://اسم-تطبيقك.streamlit.app", key="app_url").strip().rstrip("/")
+    c1, c2 = st.columns(2)
+    label = c1.text_input("اسم الشخص / الجهة (لتعرف لمن أعطيتها)", key="k_label")
+    durs = {"6 ساعات": 6, "يوم": 24, "3 أيام": 72, "أسبوع": 168, "أسبوعان": 336, "شهر": 720, "مدة أخرى (بالساعات)": 0}
+    dur = c2.selectbox("مدة التجربة (تبدأ من أول فتح)", list(durs), index=3, key="k_dur")
+    hours = durs[dur] or st.number_input("عدد الساعات", min_value=1, max_value=24 * 365, value=48, key="k_hours")
+    if st.button("➕ ولّد شفرة جديدة", type="primary", key="k_new"):
+        try:
+            _, k = keys_mod.mutate(_GT, _GG, lambda ks: keys_mod.create(ks, label, hours))
+            st.session_state["k_last"] = k["code"]
+        except Exception as e:
+            st.error(f"تعذّر الحفظ ({type(e).__name__}).")
+    try:
+        ks = store.load(_GT, _GG)["keys"]
+    except Exception as e:
+        st.error(f"تعذّر تحميل الشفرات ({type(e).__name__}).")
+        return
+    def link(c):
+        return f"{base}/?k={c}" if base else f"?k={c}"
+    if st.session_state.get("k_last"):
+        st.success("تم التوليد. انسخ الرابط وأرسله:")
+        st.code(link(st.session_state["k_last"]), language=None)
+    icons = {"active": "🟢 فعّالة", "unused": "🟡 لم تُفتح", "expired": "⚪ انتهت", "revoked": "🔴 ملغاة", "unused_expired": "⚪ سقطت (لم تُفتح)"}
+    for k in sorted(ks, key=lambda x: x.get("created", ""), reverse=True):
+        stt = keys_mod.status(k)
+        with st.container(border=True):
+            seen = keys_mod.parse(k.get("last_seen"))
+            seen_txt = seen.astimezone(core.TZ).strftime("%m-%d %H:%M") if seen else "—"
+            st.markdown(f"**{k.get('label', '')}** — {icons.get(stt, stt)} — {keys_mod.human_left(k)}  \n"
+                        f"فتحها {k.get('visits', 0)} مرة · آخر دخول: {seen_txt} (القاهرة) · المدة: {int(k.get('hours', 0))} ساعة")
+            st.code(link(k["code"]), language=None)
+            b1, b2 = st.columns(2)
+            if stt in ("active", "unused") and b1.button("⛔ إلغاء الآن", key=f"krv_{k['code']}"):
+                keys_mod.mutate(_GT, _GG, lambda ks_, c=k["code"]: keys_mod.find(ks_, c).update(revoked=True))
+                st.rerun()
+            if b2.button("🗑️ حذف من القائمة", key=f"kdl_{k['code']}"):
+                keys_mod.mutate(_GT, _GG, lambda ks_, c=k["code"]: ks_.remove(keys_mod.find(ks_, c)))
+                st.rerun()
+    st.caption("ملاحظة: الضيف لا يرى محفوظاتك ولا مصادرك المضافة، وما يحفظه يزول بإغلاق الصفحة. الإلغاء يسري خلال ~10 دقائق على من هو داخل التطبيق.")
+
+
 with tab_sv:
     render_saved()
 
 with tab_ms:
-    render_manage()
+    if IS_ADMIN:
+        render_manage()
+        st.divider()
+        render_keys_admin()
+    else:
+        st.info("إدارة المصادر والشفرات غير متاحة في النسخة التجريبية.")

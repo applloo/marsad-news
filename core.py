@@ -398,16 +398,35 @@ def domain_match(dom, doms):
     return any(dom == d or dom.endswith("." + d) for d in doms)
 
 
+# رمز لغة المصدر في القوائم ← (رمز الترجمة، اسم لغة GDELT). "both" = عبري + إنجليزي. يجوز الجمع: "tr,en"
+LANG_MAP = {"he": ("iw", "heb"), "en": ("en", "eng"), "ar": ("ar", "arabic"), "tr": ("tr", "turkish"),
+            "fa": ("fa", "persian"), "am": ("am", "amharic")}
+LANG_ORDER = ["he", "en", "ar", "tr", "fa", "am"]
+
+
+def entry_langs(lang):
+    out = []
+    for x in (lang or "").replace("both", "he,en").split(","):
+        x = x.strip()
+        if x in LANG_MAP and x not in out:
+            out.append(x)
+    return out
+
+
+def codes_for(selected):
+    """رموز الترجمة للغات المصادر المختارة (لمطابقة الكلمات داخل النص)"""
+    have = {l for _, _, lg in selected for l in entry_langs(lg)}
+    return [LANG_MAP[l][0] for l in LANG_ORDER if l in have] or ["en", "iw"]
+
+
 def jobs_for_sources(selected, country=None):
-    """selected: قائمة (label, domains, lang) حيث lang في he / en / both.
-    country: رمز بلد GDELT (US/UK/IS) يُستخدم كخطة بديلة إن فشل فلتر الدومين"""
-    he = _split_domains([d for _, d, lang in selected if lang in ("he", "both")])
-    en = _split_domains([d for _, d, lang in selected if lang in ("en", "both")])
+    """selected: قائمة (label, domains, lang). country: رمز بلد GDELT يُستخدم كخطة بديلة إن فشل فلتر الدومين"""
     jobs = []
-    if he:
-        jobs.append({"code": "iw", "extra": domain_expr(he), "domains": he, "country": country, "lang": "heb"})
-    if en:
-        jobs.append({"code": "en", "extra": domain_expr(en), "domains": en, "country": country, "lang": "eng"})
+    for l in LANG_ORDER:
+        doms = _split_domains([d for _, d, lg in selected if l in entry_langs(lg)])
+        if doms:
+            code, gl = LANG_MAP[l]
+            jobs.append({"code": code, "extra": domain_expr(doms), "domains": doms, "country": country, "lang": gl})
     return jobs
 
 
@@ -846,6 +865,9 @@ _GN_LOC = {
     "en": {"US": ("en-US", "US", "US:en"), "UK": ("en-GB", "GB", "GB:en"), "IL": ("en-IL", "IL", "IL:en")},
     "he": {"IL": ("iw", "IL", "IL:he")},
     "ar": {"EG": ("ar", "EG", "EG:ar")},
+    "tr": {"TR": ("tr", "TR", "TR:tr")},
+    "fa": {"US": ("en-US", "US", "US:en")},  # لا نسخة فارسية في أخبار Google: يُستعمل الموقع الأمريكي والبحث بالفارسية
+    "am": {"US": ("en-US", "US", "US:en")},
 }
 
 
@@ -888,20 +910,17 @@ def gnews_site_search(selected, days, terms=None, joiner="OR", author=None, auth
     terms: كلمات عربية تُترجم؛ author/author_he: اسم الكاتب بالإنجليزية/العبرية. يعيد (items, notes)"""
     items, notes = [], []
     loc_c = country if country in ("US", "UK", "IL") else "US"
-    buckets = {
-        "en": _split_domains([d for _, d, lg in selected if lg in ("en", "both")]),
-        "he": _split_domains([d for _, d, lg in selected if lg in ("he", "both")]),
-        "ar": _split_domains([d for _, d, lg in selected if lg == "ar"]),
-    }
+    buckets = {l: _split_domains([d for _, d, lg in selected if l in entry_langs(lg)]) for l in LANG_ORDER}
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     names = [n for n in (author, author_he) if n]
     for lang, doms in buckets.items():
         if not doms:
             continue
-        if lang == "ar":
+        if lang in ("ar", "tr", "fa", "am"):
             if author or author_he:
-                continue  # بحث الكاتب لا يشمل الصحف العربية
-            who, code, loc = "", "ar", _GN_LOC["ar"]["EG"]
+                continue  # بحث الكاتب لا يشمل الصحف غير العبرية/الإنجليزية
+            who, code = "", LANG_MAP[lang][0]
+            loc = next(iter(_GN_LOC[lang].values()))
         elif lang == "he":
             who = author_he or (tr(author, "en", "iw") if author else "")
             code, loc = "iw", _GN_LOC["he"]["IL"]
@@ -918,10 +937,10 @@ def gnews_site_search(selected, days, terms=None, joiner="OR", author=None, auth
                 x = t if _HAS_AR.search(t) else tr(t, "en", "ar")
             else:
                 x = t if (code == "en" and not _HAS_AR.search(t)) else tr(t, "ar", code)
-            if x and (code == "ar" or not _HAS_AR.search(x)):
+            if x and (code in ("ar", "fa") or not _HAS_AR.search(x)):
                 tparts.append(_quoted(x))
         if terms and not tparts:
-            notes.append(f"تعذّرت ترجمة الكلمات إلى {'العبرية' if code == 'iw' else 'الإنجليزية'} — تخطّيتُ هذه اللغة")
+            notes.append(f"تعذّرت ترجمة الكلمات إلى {LANG_NAME_AR.get(code, code)} — تخطّيتُ هذه اللغة")
             continue
         for i in range(0, len(doms), 8):
             chunk = doms[i : i + 8]
@@ -951,7 +970,7 @@ def gnews_site_search(selected, days, terms=None, joiner="OR", author=None, auth
                 a = {
                     "url": e["link"], "title": title, "seendate": e["date"].strftime("%Y%m%dT%H%M%SZ"),
                     "domain": host, "sourcecountry": COUNTRY_EN.get(loc_c, ""),
-                    "language": {"he": "Hebrew", "ar": "Arabic"}.get(lang, "English"),
+                    "language": {"he": "Hebrew", "ar": "Arabic", "tr": "Turkish", "fa": "Persian", "am": "Amharic"}.get(lang, "English"),
                 }
                 if author or author_he:
                     a.update({"writer": author or who, "writer_en": author or who,
