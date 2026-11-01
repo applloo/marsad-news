@@ -1097,8 +1097,8 @@ with tab_br:
                 update_meta(dd, sel_b)
         render_results("br")
     else:
-        src_label = st.selectbox("المصدر", list(pool_all.keys()), key="br_src")
-        lbl, dom_s, lang_s = pool_all[src_label]
+        br_pick = st.selectbox("المصدر", list(pool_all.keys()), key="br_src")
+        lbl, dom_s, lang_s = pool_all[br_pick]
         dlist = [d for d in dom_s.split("|") if d]
         secs = []
         for d in dlist:
