@@ -224,13 +224,37 @@ def is_safe_url(url):
         return False
 
 
+_VOID = {"br", "img", "meta", "link", "input", "hr", "source", "wbr", "area", "base", "col", "embed", "param", "track"}
+_BLOCKS = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "div", "section", "article", "main", "tr", "td", "th",
+           "ul", "ol", "table", "figure", "figcaption", "details", "summary", "dd", "dt", "pre", "br"}
+_SHORT_OK = {"li", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "figcaption", "summary"}
+_CONTAINER = re.compile(r"entry-content|post-content|article-body|article__body|td-post-content|single-content|post-body|story-body|the-content", re.I)
+
+
 class _SimpleExtractor(HTMLParser):
-    """مستخرج بديل بسيط: فقرات <p> + العنوان + تاريخ النشر من الميتا"""
+    """مستخرج بديل: كل نص مقروء بين حدود الكتل (فقرات، قوائم، عناوين، div، فواصل <br>)، مع تفضيل حاوية المقال إن وُجدت"""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.title, self.date, self.paras = "", "", []
-        self._skip, self._in_p, self._in_title, self._buf = 0, False, False, []
+        self.title, self.date = "", ""
+        self._all, self._cont = [], []
+        self._skip, self._in_title, self._buf, self._stack, self._cdepth = 0, False, [], [], None
+
+    @property
+    def paras(self):
+        cont = "\n".join(self._cont)
+        return self._cont if len(cont) >= 400 else self._all
+
+    def _flush(self):
+        t = " ".join("".join(self._buf).split())
+        self._buf = []
+        if not t:
+            return
+        top = self._stack[-1] if self._stack else ""
+        if len(t) >= (10 if top in _SHORT_OK else (22 if self._cdepth is not None else 40)):
+            self._all.append(t)
+            if self._cdepth is not None:
+                self._cont.append(t)
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -238,31 +262,42 @@ class _SimpleExtractor(HTMLParser):
             self._skip += 1
         elif tag == "title":
             self._in_title = True
-        elif tag == "p" and not self._skip:
-            self._in_p, self._buf = True, []
         elif tag == "meta":
             k = (a.get("property") or a.get("name") or "").lower()
             if k in ("article:published_time", "og:article:published_time", "date", "pubdate") and not self.date:
                 self.date = a.get("content", "")
             if k == "og:title" and a.get("content"):
                 self.title = a["content"]
+        if tag in _BLOCKS and not self._skip:
+            self._flush()
+        if tag not in _VOID:
+            self._stack.append(tag)
+            if self._cdepth is None and (tag == "article" or _CONTAINER.search((a.get("class") or "") + " " + (a.get("id") or ""))):
+                self._cdepth = len(self._stack)
 
     def handle_endtag(self, tag):
         if tag in ("script", "style", "nav", "footer", "header", "aside", "form", "noscript"):
             self._skip = max(0, self._skip - 1)
         elif tag == "title":
             self._in_title = False
-        elif tag == "p" and self._in_p:
-            t = " ".join("".join(self._buf).split())
-            if len(t) > 40:
-                self.paras.append(t)
-            self._in_p = False
+        if tag in _BLOCKS and not self._skip:
+            self._flush()
+        if tag in self._stack:
+            while self._stack:
+                if self._stack.pop() == tag:
+                    break
+            if self._cdepth is not None and len(self._stack) < self._cdepth:
+                self._cdepth = None
 
     def handle_data(self, data):
         if self._in_title and not self.title:
             self.title = data.strip()
-        if self._in_p:
+        if not self._skip and not self._in_title:
             self._buf.append(data)
+
+    def close(self):
+        self._flush()
+        super().close()
 
 
 _META_SEC = [
@@ -301,7 +336,27 @@ def _extract(content, enc=None):
     if out is None:
         ex = _SimpleExtractor()
         ex.feed(text)
+        ex.close()
         out = {"title": ex.title, "date": ex.date, "text": "\n".join(ex.paras)}
+    if out is not None and len(out["text"]) < 3000:  # يبدو مقطوعاً: جرّب تمريرة أوسع ثم المستخرج البسيط واختر الأطول
+        try:
+            if trafilatura is not None:
+                d2 = trafilatura.extract(text, output_format="json", with_metadata=True, favor_recall=True,
+                                         include_tables=True, include_comments=False, deduplicate=False)
+                if d2:
+                    t2 = json.loads(d2).get("text") or ""
+                    if len(t2) > len(out["text"]) * 1.15:
+                        out["text"] = t2
+        except Exception:
+            pass
+        ex = _SimpleExtractor()
+        ex.feed(text)
+        ex.close()
+        t3 = "\n".join(ex.paras)
+        if len(t3) > len(out["text"]) * 1.3:
+            out["text"] = t3
+            out["title"] = out["title"] or ex.title
+            out["date"] = out["date"] or ex.date
     out["section"] = _page_meta(text[:200000])
     words = max(1, len(out["text"].split()))
     out["fp"] = 1000.0 * len(_FIRST_PERSON.findall(out["text"])) / words if words > 200 else 0.0
