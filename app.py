@@ -238,20 +238,21 @@ def translate_proxy_url(url, tl="ar"):
 
 
 def embed_browser(url):
-    """متصفح صغير داخل الصفحة: يفتح الرابط الأصلي أو نسخته المترجمة للعربية"""
+    """فتح الصفحة الأصلية مترجمة: أزرار تاب جديد (الأضمن) + إطار داخلي اختياري"""
     import streamlit.components.v1 as components
-    with st.expander("🌐 افتح الصفحة الأصلية هنا (متصفح صغير) مع ترجمة", expanded=True):
-        mode = st.radio("العرض", ["مترجمة للعربية", "الأصلية بلغتها"], horizontal=True, key="emb_mode")
-        src = translate_proxy_url(url) if mode.startswith("مترجمة") else url
-        h = st.select_slider("ارتفاع الإطار", [500, 700, 900, 1200], value=700, key="emb_h")
-        components.html(
-            f"<iframe src='{html.escape(src, quote=True)}' style='width:100%;height:{h-10}px;border:1px solid #334155;border-radius:8px;background:#fff' "
-            "referrerpolicy='no-referrer' loading='lazy'></iframe>", height=h, scrolling=False)
-        st.caption("لو الإطار طلع فاضي أو فيه رسالة خطأ، يبقى الموقع (أو جوجل) مانع العرض داخل صفحات تانية. "
-                   "جرّب الزرارين تحت، بيفتحوا في تاب جديد.")
+    with st.expander("🌐 افتح الصفحة الأصلية مترجمة للعربية", expanded=True):
         c1, c2 = st.columns(2)
-        c1.link_button("↗️ الأصلية في تاب جديد", url, use_container_width=True)
-        c2.link_button("↗️ المترجمة في تاب جديد", translate_proxy_url(url), use_container_width=True)
+        c1.link_button("🌐 مترجمة (ترجمة جوجل) ↗️", translate_proxy_url(url), use_container_width=True, type="primary")
+        c2.link_button("📄 الأصلية ↗️", url, use_container_width=True)
+        st.caption("لو الأصلية فتحت عندك، اضغط بيمين الماوس ← «ترجمة إلى العربية» (متصفح كروم بيترجم أي لغة). "
+                   "الزرارين بيفتحوا في تاب جديد وده أضمن من الإطار.")
+        if st.checkbox("جرّب عرضها داخل هذه الصفحة (قد لا يعمل مع بعض المواقع)", key="emb_on"):
+            mode = st.radio("العرض", ["مترجمة للعربية", "الأصلية بلغتها"], horizontal=True, key="emb_mode")
+            src = translate_proxy_url(url) if mode.startswith("مترجمة") else url
+            components.html(
+                f"<iframe src='{html.escape(src, quote=True)}' style='width:100%;height:690px;border:1px solid #334155;border-radius:8px;background:#fff' "
+                "referrerpolicy='no-referrer'></iframe>", height=700, scrolling=False)
+            st.caption("لو ظهرت علامة وش حزين، يبقى الموقع مانع العرض داخل صفحات تانية. استخدم الزرارين اللي فوق.")
 
 
 def reader_page():
