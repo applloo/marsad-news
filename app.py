@@ -54,6 +54,14 @@ a.btn {display:inline-block; background:#1d4ed8; color:#fff !important; padding:
 a.btn:hover {background:#1e40af;}
 .card {border:1px solid rgba(128,128,128,.3); border-radius:10px; padding:12px 14px; margin-bottom:10px;}
 .article-body p {line-height:2; font-size:1.05rem; margin-bottom:1rem;}
+/* التابات: تنزل على أكثر من سطر فتظهر كلها بلا تمرير جانبي، وأزرارها أكبر لسهولة اللمس */
+div[data-baseweb="tab-list"] {flex-wrap: wrap !important; overflow: visible !important; gap: 6px 4px; row-gap: 6px;}
+div[data-baseweb="tab-list"] button[data-baseweb="tab"] {padding: 10px 14px; height: auto; min-height: 44px;
+    border: 1px solid rgba(128,128,128,.35); border-radius: 10px; background: rgba(128,128,128,.08);}
+div[data-baseweb="tab-list"] button[aria-selected="true"] {background: rgba(255,75,75,.18); border-color: #ff4b4b; font-weight: 700;}
+div[data-baseweb="tab-highlight"], div[data-baseweb="tab-border"] {display: none !important;}
+::-webkit-scrollbar {height: 14px; width: 14px;}
+::-webkit-scrollbar-thumb {background: rgba(128,128,128,.6); border-radius: 8px;}
 @media (max-width:640px){ .ar-title{font-size:1.05rem;} }
 </style>
 """,
