@@ -936,7 +936,7 @@ def gnews_site_search(selected, days, terms=None, joiner="OR", author=None, auth
             if code == "ar":
                 x = t if _HAS_AR.search(t) else tr(t, "en", "ar")
             else:
-                x = t if (code == "en" and not _HAS_AR.search(t)) else tr(t, "ar", code)
+                x = t if (code == "en" and not _HAS_AR.search(t)) else tr(t, "ar" if _HAS_AR.search(t) else "en", code)
             if x and (code in ("ar", "fa") or not _HAS_AR.search(x)):
                 tparts.append(_quoted(x))
         if terms and not tparts:
@@ -1278,32 +1278,12 @@ def analyze_url(url):
 
 
 def summarize(url, api_key=None):
+    """ملخص سريع مجاني: أول جمل المقال مترجمة للعربية (لا يستخدم أي مفتاح أو ذكاء اصطناعي خارجي)"""
     art = fetch_article(url)
     if not art:
         return "تعذّر جلب نص المقال (قد يكون خلف جدار اشتراك أو يحجب الزحف)."
-    if api_key:
-        prompt = (
-            "لخّص المقال الإخباري التالي بالعربية الفصحى المبسّطة بأسلوب يناسب كتابة سكريبت أو تعليق إخباري مباشر:\n"
-            "1) خمس إلى سبع نقاط مركّزة بأهم الوقائع والأرقام والأسماء.\n"
-            "2) ثم فقرة قصيرة (3-4 جمل) بصياغة جاهزة للقراءة على الهواء.\n"
-            "لا تضف معلومات من خارج النص.\n\n"
-            f"العنوان: {art['title']}\n\nالنص:\n{art['text'][:12000]}"
-        )
-        try:
-            r = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": "claude-sonnet-5-5", "max_tokens": 900, "messages": [{"role": "user", "content": prompt}]},
-                timeout=90,
-            )
-            r.raise_for_status()
-            return "".join(b.get("text", "") for b in r.json().get("content", []))
-        except Exception as e:
-            return f"فشل التلخيص عبر Claude: {e}"
     sentences = re.split(r"(?<=[.!?])\s+", art["text"])[:5]
-    return "ملخص مبسّط (أول جمل المقال مترجمة — أضف ANTHROPIC_API_KEY لتلخيص ذكي):\n\n" + tr(
-        " ".join(sentences), "auto", "ar"
-    )
+    return "ملخص مبسّط (أول جمل المقال مترجمة):\n\n" + tr(" ".join(sentences), "auto", "ar")
 
 
 # ───────────────────────── القراءة الصوتية (TTS) ─────────────────────────

@@ -16,6 +16,7 @@ import core
 import intel
 from core import fmt_seen, tr
 import hmac
+from about import TAB_HELP, TAB_NAMES, points as about_points
 import keys as keys_mod
 import store
 import time
@@ -72,13 +73,6 @@ a.btn:hover {background:#1e40af;}
 )
 
 
-def get_key():
-    try:
-        k = st.secrets.get("ANTHROPIC_API_KEY")
-    except Exception:
-        k = None
-    return k or os.getenv("ANTHROPIC_API_KEY")
-
 
 # ───────────────────────── القراءة الصوتية ─────────────────────────
 
@@ -117,7 +111,7 @@ def speech_text(url, title_ar, mode):
     if not art:
         return title_ar, "تعذّر جلب نص المقال (اشتراك أو حجب) فقُرئ العنوان فقط."
     if mode == TTS_MODES[1]:
-        summ = core.summarize(url, get_key())
+        summ = core.summarize(url)
         summ = re.sub(r"^ملخص مبسّط[^\n]*\n+", "", summ)
         return f"{title_ar}. {summ}", ""
     return f"{title_ar}. {core.translate_long(art['text'])}", ""
@@ -214,9 +208,9 @@ def reader_page():
     st.markdown(f"### {title_ar}")
     st.markdown(f"<div class='ltr' dir='ltr'>{html.escape(title)}</div>", unsafe_allow_html=True)
 
-    if st.button("📝 تلخيص المقال"):
+    if st.button("📝 ملخص سريع للمقال"):
         with st.spinner("جارٍ التلخيص…"):
-            st.info(core.summarize(url, get_key()))
+            st.info(core.summarize(url))
 
     with st.expander("🎧 استمع للمقال بصوت مسموع", expanded=False):
         voice, rate = tts_settings("rd")
@@ -245,6 +239,24 @@ def reader_page():
         st.divider()
         alt_block(title, url)
 
+
+
+import base64 as _b64
+
+_LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 140" width="520" height="140" role="img" aria-label="Ehab Ibrahim"> <defs> <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0f2a47"/><stop offset="1" stop-color="#0a1626"/></linearGradient> <linearGradient id="sw" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22d3ee" stop-opacity="0"/><stop offset="1" stop-color="#22d3ee" stop-opacity=".75"/></linearGradient> </defs> <rect x="6" y="6" width="128" height="128" rx="28" fill="url(#bg)"/> <g transform="translate(70 70)" fill="none" stroke="#22d3ee" stroke-width="2.2" opacity=".9"> <circle r="46"/><circle r="31"/><circle r="16"/> <path d="M-46 0H46M0 -46V46" stroke-opacity=".35"/> </g> <path d="M70 70 L70 24 A46 46 0 0 1 110 47 Z" fill="url(#sw)"/> <line x1="70" y1="70" x2="110" y2="47" stroke="#67e8f9" stroke-width="2.5" stroke-linecap="round"/> <circle cx="94" cy="52" r="4.5" fill="#fbbf24"/><circle cx="52" cy="88" r="3.2" fill="#f87171"/> <text x="156" y="68" font-family="Georgia, \'Times New Roman\', serif" font-size="46" font-weight="700" fill="#e2e8f0">Ehab Ibrahim</text> <rect x="158" y="80" width="64" height="4" rx="2" fill="#22d3ee"/> <text x="158" y="112" font-family="Tahoma, Arial, sans-serif" font-size="21" fill="#94a3b8" letter-spacing=".5">رادار الأخبار العالمية</text> </svg> '
+
+
+def show_logo(width=300):
+    """شعار المالك (Ehab Ibrahim) أعلى الصفحة"""
+    b = _b64.b64encode(_LOGO_SVG.encode("utf-8")).decode()
+    st.markdown(f"<div style='direction:ltr;text-align:left;margin:0 0 6px'><img alt='Ehab Ibrahim' width='{width}' src='data:image/svg+xml;base64,{b}'></div>",
+                unsafe_allow_html=True)
+
+
+def show_footer():
+    st.divider()
+    st.markdown("<div style='text-align:center;color:#94a3b8;font-size:.85rem'>© Ehab Ibrahim — رادار الأخبار العالمية · جميع الحقوق محفوظة</div>",
+                unsafe_allow_html=True)
 
 
 # ───────────────────────── بوابة الشفرات (اختيارية: تعمل فقط إن وُجد ADMIN_KEY في Secrets) ─────────────────────────
@@ -316,6 +328,7 @@ def gate():
         msg = _try_code(code) or msg
         if ss.get("auth"):
             return
+    show_logo()
     st.title("🔒 رادار الأخبار العالمية")
     st.markdown("هذه النسخة بالدعوة فقط. اكتب الشفرة التي وصلتك مع الرابط.")
     if msg:
@@ -507,12 +520,24 @@ def do_analyze():
 
 # ───────────────────────── الواجهة الرئيسية ─────────────────────────
 
+show_logo()
 st.title("📰 رادار الأخبار العالمية")
 if not IS_ADMIN:
     _a = st.session_state["auth"]
     st.info(f"🎟️ نسخة تجريبية لـ «{_a.get('label', '')}» — "
             f"تنتهي {keys_mod.parse(_a['exp']).astimezone(core.TZ).strftime('%Y-%m-%d %H:%M')} بتوقيت القاهرة. "
             "لا يُحفظ شيء بعد إغلاق الصفحة.")
+
+
+def render_about():
+    """قسم «ما هذا التطبيق؟»: يُبنى من بيانات التطبيق نفسها فيتحدّث تلقائياً"""
+    n_src = len({d for g in (ISRAEL, USA, UK, REGION, ARABIC) for ents in g.values() for _, d, _ in ents})
+    stats = {"n_sources": n_src, "langs": [core.LANG_NAME_AR.get(c, c) for c, _, _, _ in core.LANGS],
+             "n_writers": len(WRITERS), "n_files": len(intel.FILES), "file_names": list(intel.FILES)}
+    with st.expander("ℹ️ ما هذا التطبيق؟ وماذا يفعل؟"):
+        st.markdown("\n".join(f"{i}. {p}" for i, p in enumerate(about_points(stats), 1)))
+        st.markdown("**أقسام التطبيق:**")
+        st.markdown("\n".join(f"- **{n}** — {TAB_HELP[n]}" for n in TAB_NAMES))
 
 
 def render_daily():
@@ -564,8 +589,10 @@ def render_daily():
                         f"{intel.SIDES.get(a['side'], '')}  \n  [ترجم المقال]({lnk}) · [الأصل]({a['url']})")
 
 
+render_about()
 if not IS_ADMIN and st.session_state["auth"].get("scope") == "reports":
     render_daily()  # اشتراك «تقرير فقط»: لا يرى بقية التطبيق
+    show_footer()
     st.stop()
 
 st.caption("اكتب بالعربية كلمة أو عدة كلمات أو جملة مركّبة — تُترجم تلقائياً إلى العبرية والإنجليزية وتُترجم النتائج للعربية.")
@@ -785,9 +812,9 @@ def render_results(key):
                         st.markdown(f"<div class='ltr' dir='ltr'>{highlight(sn, data['hl'])}</div>", unsafe_allow_html=True)
                 else:
                     st.warning("⚠️ كلمتك لم تظهر في نص هذا المقال — ربما تطابق GDELT مع الصفحة أو الروابط الجانبية.")
-            if st.button("📝 تلخيص المقال", key=f"sum_{key}_{i}"):
+            if st.button("📝 ملخص سريع للمقال", key=f"sum_{key}_{i}"):
                 with st.spinner("جارٍ التلخيص…"):
-                    data["summaries"][url] = core.summarize(url, get_key())
+                    data["summaries"][url] = core.summarize(url)
             if url in data["summaries"]:
                 st.info(data["summaries"][url])
             listen_widget(a, f"{key}_{i}")
@@ -797,10 +824,7 @@ def render_results(key):
                 st.button("💾 حفظ للقراءة لاحقاً", key=f"save_{key}_{i}", on_click=save_item, args=(a, key))
 
 
-tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_sv, tab_ms = st.tabs(
-    ["📰 التقرير اليومي", "✍️ كتّاب ومحللون", "🔤 ترجمة ثم بحث", "🇮🇱 إسرائيلية (عبري)", "🇺🇸 أمريكية", "🇬🇧 بريطانية", "🌍 تركيا وإيران وإثيوبيا", "🗞️ تصفّح مصدر", "🛰️ مكتب الاستخبارات", "🌐 بحث عام GDELT",
-     "📌 المحفوظات", "⚙️ مصادري"]
-)
+tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_sv, tab_ms = st.tabs(TAB_NAMES)
 
 def all_entries(key, groups):
     out = []
@@ -1089,8 +1113,18 @@ def intel_matrix(view):
 with tab_in:
     st.caption("مكتب استخبارات مفتوح المصدر للشرق الأوسط والقرن الأفريقي: تصفّح مؤسسة واحدة أو عدة مؤسسات أو كلها، وأضف التحركات المصرية لأي ملف، "
                "وقارن المنظورات في جدول ربط، ثم اصنع تقريراً. التصنيف تقديري من العنوان والرابط ولا يُغني عن مراجعة المصدر.")
-    fname = st.radio("الملف", list(intel.FILES.keys()), horizontal=True, key="in_file")
-    fmeta = intel.FILES[fname]
+    all_files = list(intel.FILES.keys())
+    if st.checkbox("اختر كل الملفات دفعة واحدة", value=False, key="in_allfiles"):
+        fnames = all_files
+    else:
+        fnames = st.multiselect("الملفات (اختر ملفاً أو أكثر، وسيُبحث فيها كلها معاً)", all_files, default=all_files[:1], key="in_files")
+    if not fnames:
+        st.warning("اختر ملفاً واحداً على الأقل.")
+        fnames = all_files[:1]
+    fname = " + ".join(fnames)
+    fmeta = {"terms": list(dict.fromkeys(t for f in fnames for t in intel.FILES[f]["terms"])),
+             "egypt": list(dict.fromkeys(t for f in fnames for t in intel.FILES[f]["egypt"])),
+             "axes": "؛ ".join(intel.FILES[f]["axes"] for f in fnames)}
     st.markdown(f"**المحاور:** {fmeta['axes']}")
     egm = st.radio("التحركات المصرية", ["الملف + التحركات المصرية", "الملف فقط", "التحركات المصرية فقط"], horizontal=True, key="in_eg")
     base_terms = fmeta["terms"] if egm != "التحركات المصرية فقط" else []
@@ -1100,6 +1134,8 @@ with tab_in:
     if qmode.startswith("🔎"):
         terms_txt = st.text_input("كلمات البحث (يمكن تعديلها؛ بالإنجليزية أو العربية، بفاصلة)", value="، ".join(base_terms + eg_terms),
                                   key=f"in_terms_{fname}_{egm}")
+        if len(fnames) > 1:
+            st.caption(f"سيُبحث في {len(fnames)} ملفات معاً بكلماتها مجتمعة؛ قصّ الكلمات إن كانت كثيرة.")
     names = [x[0] for x in intel.SOURCES]
     side_list = [v for k, v in intel.SIDES.items() if k != "uk"]
     side_codes = {v: k for k, v in intel.SIDES.items()}
@@ -1361,9 +1397,9 @@ def render_saved():
                 on_change=set_note, args=(it["url"], f"note_{h}"),
             )
             b1, b2 = st.columns(2)
-            if b1.button("📝 تلخيص المقال", key=f"svsum_{h}"):
+            if b1.button("📝 ملخص سريع للمقال", key=f"svsum_{h}"):
                 with st.spinner("جارٍ التلخيص…"):
-                    sums[it["url"]] = core.summarize(it["url"], get_key())
+                    sums[it["url"]] = core.summarize(it["url"])
             b2.button("🗑️ حذف من المحفوظات", key=f"del_{h}", on_click=delete_item, args=(it["url"],))
             listen_widget(it, f"sv_{h}")
             if it["url"] in sums:
@@ -1511,3 +1547,5 @@ with tab_ms:
         render_keys_admin()
     else:
         st.info("إدارة المصادر والشفرات غير متاحة في النسخة التجريبية.")
+
+show_footer()
