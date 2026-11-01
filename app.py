@@ -279,7 +279,13 @@ def reader_page():
         title = art["title"] or orig_title
         title_ar = tr(title, "auto", "ar")
         body_ar = core.translate_long(art["text"])
+        body_ok = core.translated_ok(art["text"], body_ar)
 
+    if not body_ok:
+        st.warning("⚠️ الترجمة التلقائية للنص لم تكتمل الآن (غالباً جوجل مشغول). اضغط «أعد الترجمة» بعد لحظات، "
+                   "أو استخدم زرار «مترجمة (ترجمة جوجل)» أعلى الصفحة.")
+        if st.button("🔁 أعد الترجمة", key="rd_retry"):
+            st.rerun()
     trunc_alt = False
     tail = art["text"][-300:].lower()
     if len(art["text"]) < 1800 or re.search(r"loading\.\.\.|subscribe|log in to|טוען|למנויים|הרשמה", tail):
