@@ -49,12 +49,12 @@ _TR_CACHE = {}
 
 
 def _gtx(text, src, dest):
-    r = requests.get(
-        "https://translate.googleapis.com/translate_a/single",
-        params={"client": "gtx", "sl": src, "tl": dest, "dt": "t", "q": text},
-        headers=UA,
-        timeout=20,
-    )
+    url = "https://translate.googleapis.com/translate_a/single"
+    prm = {"client": "gtx", "sl": src, "tl": dest, "dt": "t"}
+    if len(text) > 500:  # النص الطويل (العبرية خصوصاً) يتجاوز حد طول الرابط في GET
+        r = requests.post(url, params=prm, data={"q": text}, headers=UA, timeout=30)
+    else:
+        r = requests.get(url, params={**prm, "q": text}, headers=UA, timeout=20)
     r.raise_for_status()
     return "".join(seg[0] for seg in r.json()[0] if seg and seg[0])
 
@@ -199,12 +199,43 @@ def chunk_text(text, limit=4000):
     return chunks
 
 
-@lru_cache(maxsize=256)
+_LONG_CACHE = {}
+
+
+def translated_ok(src, out):
+    """هل تُرجم النص فعلاً؟ (غير العربي أصلاً ويظهر في الناتج عربي كافٍ)"""
+    if _HAS_AR.search(src or "") and len(re.findall(r"[\u0600-\u06FF]", src)) > 0.5 * max(1, len(re.findall(r"\w", src))):
+        return True  # عربي أصلاً
+    letters = re.findall(r"\w", out or "")
+    return bool(letters) and len(re.findall(r"[\u0600-\u06FF]", out)) > 0.4 * len(letters)
+
+
 def translate_long(text):
-    chunks = chunk_text(text)
-    with ThreadPoolExecutor(4) as ex:
-        parts = list(ex.map(lambda c: tr(c, "auto", "ar"), chunks))
-    return "\n".join(parts)
+    """يترجم نصاً طويلاً بشرائح صغيرة؛ ما فشل يُعاد بفقرات متتابعة؛ ولا يُخزَّن إلا الناجح كاملاً"""
+    if text in _LONG_CACHE:
+        return _LONG_CACHE[text]
+
+    def one(c):
+        r = tr(c, "auto", "ar")
+        if translated_ok(c, r):
+            return r
+        outp = []  # أعد بفقرات أصغر ببطء
+        for para in c.split("\n"):
+            if not para.strip():
+                continue
+            time.sleep(0.4)
+            outp.append(tr(para, "auto", "ar"))
+        return "\n".join(outp)
+
+    chunks = chunk_text(text, 1500)
+    with ThreadPoolExecutor(3) as ex:
+        parts = list(ex.map(one, chunks))
+    out = "\n".join(parts)
+    if translated_ok(text, out):
+        if len(_LONG_CACHE) > 100:
+            _LONG_CACHE.clear()
+        _LONG_CACHE[text] = out
+    return out
 
 
 # ───────────────────────── جلب المقال ─────────────────────────
