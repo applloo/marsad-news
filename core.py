@@ -940,6 +940,24 @@ def find_mentions(text, matchers, joiner="AND", maxn=2):
     return found, [x[2] for x in top]
 
 
+def count_mentions(text, matchers):
+    """عدد مرات ورود كلمات البحث في النص (جذور الكلمات؛ لكل عبارة أفضل صيغة ثم المجموع) وعدد كلمات النص"""
+    low = (text or "").lower().replace("\u0307", "")
+    total = 0
+    for alts in matchers:
+        total += max((min(low.count(s) for s in stems) for stems in alts if stems), default=0)
+    return total, len(low.split())
+
+
+def mention_level(count, words, in_title=False):
+    dens = 1000.0 * count / max(1, words)
+    if in_title or count >= 8 or dens >= 6:
+        return "محوري"
+    if count >= 3 or dens >= 2.5:
+        return "ملحوظ"
+    return "عابر"
+
+
 def enrich_items(items, matchers, joiner="AND", limit=40, workers=8):
     """يجلب نص المقالات بالتوازي ويضيف: found / snips / snip_ar، ويحسّن تصنيف النوع"""
 
@@ -952,6 +970,8 @@ def enrich_items(items, matchers, joiner="AND", limit=40, workers=8):
         a["fetched"] = True
         a["found"], snips = find_mentions(art["text"], matchers, joiner)
         a["snips"] = snips
+        a["mcount"], a["words"] = count_mentions(art["text"], matchers)
+        a["mlevel"] = mention_level(a["mcount"], a["words"], find_mentions(a.get("title", ""), matchers, "OR")[0])
         a["snip_ar"] = tr(" ".join(snips), "auto", "ar") if snips else ""
         sec = classify_section(art.get("section", ""))
         if sec:
@@ -1675,13 +1695,60 @@ def analyze_url(url):
 # ───────────────────────── التلخيص ─────────────────────────
 
 
-def summarize(url, api_key=None):
-    """ملخص سريع مجاني: أول جمل المقال مترجمة للعربية (لا يستخدم أي مفتاح أو ذكاء اصطناعي خارجي)"""
+_TOK = re.compile(r"[\w\u0590-\u05FF\u0600-\u06FF]{3,}")
+
+
+def summary_points(text, n=None):
+    """أهم جمل المقال كله (استخلاصي مجاني): تُرتَّب الجمل بتكرار كلماتها المميزة في كامل النص، وتُعاد بترتيب ورودها"""
+    sents = [x.strip() for x in re.split(r"(?<=[.!?؟])\s+|\n+", text or "") if 40 <= len(x.strip()) <= 420]
+    if not sents:
+        return []
+    stop = set().union(*[set(v) for v in STOP.values()]) if STOP else set()
+    toks = [[w for w in _TOK.findall(s.lower()) if w not in stop and not w.isdigit()] for s in sents]
+    freq = {}
+    for ws in toks:
+        for w in set(ws):
+            freq[w] = freq.get(w, 0) + 1
+    n = n or (6 if len(text) < 6000 else 8)
+    if len(sents) <= n:
+        return sents
+    scored = []
+    for i, ws in enumerate(toks):
+        sc = sum(freq[w] for w in set(ws) if freq[w] > 1) / ((len(ws) + 8) ** 0.5)
+        if i < 2:
+            sc *= 1.4
+        scored.append((sc, i))
+    top = sorted(sorted(scored, reverse=True)[:n], key=lambda x: x[1])
+    return [sents[i] for _, i in top]
+
+
+def reading_verdict(text):
+    words = len((text or "").split())
+    mins = max(1, round(words / 190))
+    if words < 150:
+        v = "مقال قصير جداً — الملخص ده يكفي غالباً."
+    elif words < 500:
+        v = "مقال قصير — اقراه لو النقاط دي تهمك."
+    elif words < 1500:
+        v = "مقال متوسط الطول."
+    else:
+        v = "مقال طويل — اقرا النقاط الأول وبعدين قرر هتكمل ولا لأ."
+    return f"⏱️ حوالي {words} كلمة (≈ {mins} دقيقة قراءة). {v}"
+
+
+def summarize(url, api_key=None, verdict=True):
+    """ملخص مجاني للمقال كله في نقاط: أهم جمله مترجمة للعربية (بدون أي ذكاء اصطناعي خارجي أو مفتاح)"""
     art = fetch_article(url)
     if not art:
         return "تعذّر جلب نص المقال (قد يكون خلف جدار اشتراك أو يحجب الزحف)."
-    sentences = re.split(r"(?<=[.!?])\s+", art["text"])[:5]
-    return "ملخص مبسّط (أول جمل المقال مترجمة):\n\n" + tr(" ".join(sentences), "auto", "ar")
+    pts = summary_points(art["text"])
+    if not pts:
+        return "النص قصير جداً للتلخيص."
+    ar = _batch_tr(pts, "ar")
+    out = "ملخص مبسّط (أهم جمل المقال كله، مترجمة):\n\n" + "\n".join(f"- {p}" for p in ar)
+    if verdict:
+        out += "\n\n" + reading_verdict(art["text"])
+    return out
 
 
 # ───────────────────────── القراءة الصوتية (TTS) ─────────────────────────
