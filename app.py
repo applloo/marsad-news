@@ -18,7 +18,7 @@ from core import fmt_seen, tr
 import gh_actions
 import hmac
 import links as links_mod
-from about import TAB_HELP, TAB_NAMES, points as about_points
+from about import TAB_HELP, TAB_NAMES, plain as about_plain, sections as about_sections
 import keys as keys_mod
 import store
 import time
@@ -699,10 +699,13 @@ def render_about():
     n_src = len({d for g in (ISRAEL, USA, UK, REGION, ARABIC) for ents in g.values() for _, d, _ in ents})
     stats = {"n_sources": n_src, "langs": [core.LANG_NAME_AR.get(c, c) for c, _, _, _ in core.LANGS],
              "n_writers": len(WRITERS), "n_files": len(intel.FILES), "file_names": list(intel.FILES), "threads": list(links_mod.THREADS)}
-    with st.expander("ℹ️ ما هذا التطبيق؟ وماذا يفعل؟"):
-        st.markdown("\n".join(f"{i}. {p}" for i, p in enumerate(about_points(stats), 1)))
-        st.markdown("**أقسام التطبيق:**")
-        st.markdown("\n".join(f"- **{n}** — {TAB_HELP[n]}" for n in TAB_NAMES))
+    with st.expander(about_plain("ما هذا التطبيق؟ وايه اللي بيعمله؟")):
+        for title, body in about_sections(stats):
+            st.markdown(f"**{about_plain(title)}**")
+            if body is None:  # قائمة التابات من TAB_HELP
+                st.markdown("\n".join(f"- **{about_plain(n)}:** {about_plain(TAB_HELP[n])}" for n in TAB_NAMES))
+            else:
+                st.markdown(about_plain(body))
 
 
 def render_run_report():
