@@ -141,7 +141,7 @@ def speech_text(url, title_ar, mode):
     if not art:
         return title_ar, "تعذّر جلب نص المقال (اشتراك أو حجب) فقُرئ العنوان فقط."
     if mode == TTS_MODES[1]:
-        summ = core.summarize(url)
+        summ = core.summarize(url, verdict=False)
         summ = re.sub(r"^ملخص مبسّط[^\n]*\n+", "", summ)
         return f"{title_ar}. {summ}", ""
     return f"{title_ar}. {core.translate_long(art['text'])}", ""
@@ -357,7 +357,7 @@ def reader_page():
     st.markdown(f"### {title_ar}")
     st.markdown(f"<div class='ltr' dir='ltr'>{html.escape(title)}</div>", unsafe_allow_html=True)
 
-    if st.button("📝 ملخص سريع للمقال"):
+    if st.button("📝 ملخص المقال في نقاط"):
         with st.spinner("جارٍ التلخيص…"):
             st.info(core.summarize(url))
 
@@ -424,6 +424,12 @@ ADMIN_KEY, _GT, _GG = _sec("ADMIN_KEY"), _sec("GITHUB_TOKEN"), _sec("GIST_ID")
 GATE_ON = bool(ADMIN_KEY and _GT and _GG)
 
 
+def _adm_tok():
+    """رمز جلسة المالك المشتق من ADMIN_KEY (لا يكشف المفتاح نفسه): يوضع في الرابط فيُعاد الدخول تلقائياً بعد انقطاع الجلسة"""
+    import hashlib
+    return hashlib.sha256(("marsad-session|" + (ADMIN_KEY or "")).encode("utf-8")).hexdigest()[:40]
+
+
 def auth_qs():
     """يُلحق الشفرة بروابط صفحة القراءة (تُفتح في تبويب جديد = جلسة جديدة)"""
     a = st.session_state.get("auth") or {}
@@ -435,8 +441,8 @@ def _try_code(code):
     code = (code or "").strip()
     if not code:
         return ""
-    if hmac.compare_digest(code, ADMIN_KEY):
-        st.session_state["auth"] = {"role": "admin", "token": ADMIN_KEY}
+    if hmac.compare_digest(code, ADMIN_KEY) or hmac.compare_digest(code, _adm_tok()):
+        st.session_state["auth"] = {"role": "admin", "token": _adm_tok()}
         return ""
     try:
         k, why = keys_mod.touch(_GT, _GG, code)
@@ -472,12 +478,17 @@ def gate():
                 ss.pop("auth")
                 a, msg = None, "أُلغيت هذه الشفرة أو انتهت مدتها."
     if a:
+        # ثبّت الرمز في رابط الصفحة: لو انقطعت الجلسة (قفل شاشة الموبايل مثلاً) يُعاد الدخول تلقائياً بدل طلب الشفرة
+        if a.get("token") and st.query_params.get("k", "") != a["token"]:
+            st.query_params["k"] = a["token"]
         return
     code = st.query_params.get("k", "")
     if code and not ss.get("k_tried") == code:
         ss["k_tried"] = code
         msg = _try_code(code) or msg
         if ss.get("auth"):
+            if ss["auth"].get("token"):
+                st.query_params["k"] = ss["auth"]["token"]
             return
     show_logo()
     st.title("🔒 رادار الأخبار العالمية")
@@ -956,13 +967,24 @@ def card_html(a):
     )
 
 
+_MLVL = {"محوري": "🟢 المقال عن كلمتك فعلاً", "ملحوظ": "🟡 ذُكرت بشكل ملحوظ", "عابر": "⚪ ذكر عابر غالباً (مش موضوع المقال)"}
+
+
+def mention_line(a):
+    if a.get("mcount") is None or not a.get("fetched"):
+        return ""
+    n, w = a["mcount"], max(1, a.get("words", 1))
+    return f"🔢 كلمتك ذُكرت **{n}** مرة في مقال حوالي {w} كلمة — {_MLVL.get(a.get('mlevel'), '')}"
+
+
 def snippet_html(a, hl):
     if not a.get("checked"):
         return ""
     if not a.get("fetched"):
         return "<div class='meta'>ℹ️ تعذّر فحص نص المقال (قد يكون خلف اشتراك أو يحجب الزحف).</div>"
     if a.get("found"):
-        out = f"<div class='meta'>✅ ذُكرت كلمتك في نص المقال:</div><div>{html.escape(a.get('snip_ar', ''))}</div>"
+        ml = mention_line(a).replace("**", "")
+        out = f"<div class='meta'>✅ ذُكرت كلمتك في نص المقال:</div>" + (f"<div class='meta'>{html.escape(ml)}</div>" if ml else "") + f"<div>{html.escape(a.get('snip_ar', ''))}</div>"
         for sn in a.get("snips", []):
             out += f"<div class='ltr' dir='ltr'>{highlight(sn, hl)}</div>"
         return out
@@ -995,7 +1017,11 @@ def render_results(key):
         st.caption(f"تم إخفاء {data['hidden']} مقالاً لم تظهر كلمتك في نصّه.")
     if not data["items"]:
         st.info("لا نتائج ضمن هذه الفلاتر. جرّب «كل الكلمات (AND)» أو وسّع النطاق الزمني أو زِد المصادر.")
-    for i, a in enumerate(data["items"]):
+    view_items = data["items"]
+    if any(x.get("mcount") for x in view_items):
+        if st.checkbox("🔢 رتّب حسب عدد مرات ذكر كلمتك (الأكثر ذكراً أولاً)", value=False, key=f"msort_{key}"):
+            view_items = sorted(view_items, key=lambda x: (x.get("mcount") or 0), reverse=True)
+    for i, a in enumerate(view_items):
         url = a.get("url", "")
         with st.container(border=True):
             st.markdown(card_html(a), unsafe_allow_html=True)
@@ -1004,12 +1030,14 @@ def render_results(key):
                     st.caption("ℹ️ تعذّر فحص نص المقال (قد يكون خلف اشتراك أو يحجب الزحف).")
                 elif a.get("found"):
                     st.success("✅ ذُكرت كلمتك في نص المقال:")
+                    if mention_line(a):
+                        st.markdown(mention_line(a))
                     st.markdown(a.get("snip_ar", ""))
                     for sn in a.get("snips", []):
                         st.markdown(f"<div class='ltr' dir='ltr'>{highlight(sn, data['hl'])}</div>", unsafe_allow_html=True)
                 else:
                     st.warning("⚠️ كلمتك لم تظهر في نص هذا المقال — ربما تطابق GDELT مع الصفحة أو الروابط الجانبية.")
-            if st.button("📝 ملخص سريع للمقال", key=f"sum_{key}_{i}"):
+            if st.button("📝 ملخص المقال في نقاط", key=f"sum_{key}_{i}"):
                 with st.spinner("جارٍ التلخيص…"):
                     data["summaries"][url] = core.summarize(url)
             if url in data["summaries"]:
