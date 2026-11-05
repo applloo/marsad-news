@@ -1915,7 +1915,15 @@ def render_watch():
             ico = {"success": "✅ خلص", "failure": "❌ فشل", "cancelled": "⚪ اتلغى"}.get(lr["conclusion"] or "", "⏳ شغال دلوقتي" if busy else "—")
             when = keys_mod.parse(lr["created"])
             wt = when.astimezone(core.TZ).strftime("%Y-%m-%d %H:%M") if when else ""
-            st.markdown(f"آخر تشغيل: **{ico}** — بدأ {wt} (القاهرة) · [التفاصيل]({lr['url']})")
+            upd = keys_mod.parse(lr.get("updated"))
+            ut = upd.astimezone(core.TZ).strftime("%H:%M") if upd else ""
+            st.markdown(f"آخر تشغيل: **{ico}** — بدأ {wt} (القاهرة)" + (f" · آخر نشاط {ut}" if busy else f" · انتهى {ut}") + f" · [افتح التفاصيل على GitHub]({lr['url']})")
+        elif tok:
+            st.markdown("آخر تشغيل: **لسه مفيش** (لو لسه دايس من ثواني دوس «حدّث» تحت)")
+        if tok:
+            st.markdown(f"[📂 صفحة التقرير المخصص على GitHub](https://github.com/{repo}/actions/workflows/watch.yml)")
+        if st.session_state.get("watch_msg"):
+            st.success(st.session_state["watch_msg"])
         b1, b2 = st.columns(2)
         if b1.button("▶️ شغّل البحث الكبير دلوقتي", type="primary", disabled=busy or not tok, key="watch_go", use_container_width=True):
             ts = watch_mod.parse_topics(txt)
@@ -1927,16 +1935,21 @@ def render_watch():
                     store.save_file(GH_TOKEN, GH_GIST, WATCH_CFG, new_cfg)
                     st.session_state["watch_cfg"] = new_cfg
                     ok, msg = gh_actions.dispatch(tok, repo, branch, "watch.yml")
-                    (st.success if ok else st.error)(msg + (" ولما يخلص دوس «حدّث» تحت." if ok else ""))
+                    if ok:
+                        time.sleep(4)
+                        st.session_state["watch_msg"] = f"✅ اتبعت الامر لـ GitHub الساعة {datetime.now(core.TZ).strftime('%H:%M')}. " + msg + " ولما يخلص دوس «حدّث»."
+                        st.rerun()
+                    st.error(msg)
                 except Exception as ex:
                     st.error(f"مقدرتش ابدأ ({type(ex).__name__}).")
         if b2.button("🔁 حدّث (هات اخر نتيجة)", key="watch_refresh", use_container_width=True):
+            st.session_state.pop("watch_msg", None)
             _watch_load(force=True)
             st.rerun()
         if st.session_state.pop("watch_err", None):
             st.warning("علامة «خلصته» ما اتحفظتش في المرة الاخيرة.")
         if not data:
-            st.info("لسه مفيش نتيجة محفوظة. دوس «شغّل» وبعد ما يخلص دوس «حدّث».")
+            st.info("لسه مفيش نتيجة محفوظة. دوس «شغّل» وبعد ما يخلص دوس «حدّث». (اخر تحديث للنتيجة: لسه مفيش)")
             return
         done = set(cfg.get("done") or [])
         created = keys_mod.parse(data.get("created"))
