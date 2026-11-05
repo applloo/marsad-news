@@ -10,14 +10,16 @@ API = "https://api.github.com/gists/"
 
 
 def empty():
-    return {"saved": [], "sources": [], "writers": [], "keys": []}
+    return {"saved": [], "sources": [], "writers": [], "keys": [], "watch_topics": ""}
 
 
 def normalize(data):
     out = empty()
     if isinstance(data, dict):
         for k in out:
-            if isinstance(data.get(k), list):
+            if isinstance(out[k], list) and isinstance(data.get(k), list):
+                out[k] = data[k]
+            elif isinstance(out[k], str) and isinstance(data.get(k), str):
                 out[k] = data[k]
     return out
 
@@ -77,3 +79,25 @@ def load_reports(token, gist_id):
         return json.loads(content or "{}")
     except ValueError:
         return {}
+
+
+def load_file(token, gist_id, name, default=None):
+    """يقرأ ملف JSON آخر من نفس الـGist (مثل نتيجة التقرير المخصص)"""
+    r = requests.get(API + gist_id, headers=_headers(token), timeout=25)
+    r.raise_for_status()
+    f = (r.json().get("files") or {}).get(name)
+    if not f:
+        return default
+    content = f.get("content") or ""
+    if f.get("truncated") and f.get("raw_url"):
+        content = requests.get(f["raw_url"], headers=_headers(token), timeout=40).text
+    try:
+        return json.loads(content or "null") or default
+    except ValueError:
+        return default
+
+
+def save_file(token, gist_id, name, data):
+    body = {"files": {name: {"content": json.dumps(data, ensure_ascii=False)}}}
+    r = requests.patch(API + gist_id, headers=_headers(token), json=body, timeout=60)
+    r.raise_for_status()

@@ -12,9 +12,9 @@ def _h(token):
             "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "marsad-news"}
 
 
-def last_run(token, repo=DEFAULT_REPO):
+def last_run(token, repo=DEFAULT_REPO, workflow=WORKFLOW):
     """آخر تشغيل: dict(status, conclusion, url, created) أو None"""
-    r = requests.get(f"https://api.github.com/repos/{repo}/actions/workflows/{WORKFLOW}/runs",
+    r = requests.get(f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs",
                      params={"per_page": 1}, headers=_h(token), timeout=20)
     r.raise_for_status()
     runs = r.json().get("workflow_runs") or []
@@ -25,12 +25,12 @@ def last_run(token, repo=DEFAULT_REPO):
             "created": x.get("created_at"), "updated": x.get("updated_at")}
 
 
-def dispatch(token, repo=DEFAULT_REPO, branch="main"):
+def dispatch(token, repo=DEFAULT_REPO, branch="main", workflow=WORKFLOW):
     """يطلب تشغيل التقرير. يعيد (نجح؟، رسالة)"""
-    r = requests.post(f"https://api.github.com/repos/{repo}/actions/workflows/{WORKFLOW}/dispatches",
+    r = requests.post(f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/dispatches",
                       json={"ref": branch}, headers=_h(token), timeout=20)
     if r.status_code == 204:
-        return True, "بدأ التشغيل. يستغرق عادةً من 6 إلى 30 دقيقة."
+        return True, "بدأ التشغيل. ممكن ياخد من 6 دقايق لحد ساعة."
     if r.status_code in (401, 403):
         return False, "التوكن مرفوض أو ينقصه صلاحية «workflow» (Actions: write)."
     if r.status_code == 404:

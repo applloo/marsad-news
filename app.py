@@ -16,6 +16,7 @@ import core
 import intel
 from core import fmt_seen, tr
 import gh_actions
+import watch as watch_mod
 import hmac
 import links as links_mod
 from about import TAB_HELP, TAB_NAMES, plain as about_plain, sections as about_sections
@@ -1852,7 +1853,146 @@ def render_keys_admin():
     st.caption("ملاحظة: الضيف لا يرى محفوظاتك ولا مصادرك المضافة، وما يحفظه يزول بإغلاق الصفحة. الإلغاء يسري خلال ~10 دقائق على من هو داخل التطبيق.")
 
 
+WATCH_SCOPES = {"il": "🇮🇱 اسرائيلي", "us": "🇺🇸 امريكي", "uk": "🇬🇧 بريطاني", "ar": "🇪🇬 عربي", "rg": "🌍 تركيا وايران واثيوبيا"}
+WATCH_CFG, WATCH_OUT = "marsad_watch_cfg.json", "marsad_watch.json"
+
+
+def _watch_load(force=False):
+    if not (GH_TOKEN and GH_GIST):
+        return None, {}
+    if force or "watch_data" not in st.session_state or time.time() - st.session_state.get("watch_t", 0) > 300:
+        try:
+            st.session_state["watch_data"] = store.load_file(GH_TOKEN, GH_GIST, WATCH_OUT, None)
+            st.session_state["watch_cfg"] = store.load_file(GH_TOKEN, GH_GIST, WATCH_CFG, {}) or {}
+        except Exception as ex:
+            st.error(f"تعذّر قراءة التقرير المحفوظ ({type(ex).__name__}).")
+            return st.session_state.get("watch_data"), st.session_state.get("watch_cfg", {})
+        st.session_state["watch_t"] = time.time()
+    return st.session_state.get("watch_data"), st.session_state.get("watch_cfg", {})
+
+
+def _watch_done_toggle(url):
+    cfg = st.session_state.get("watch_cfg", {})
+    done = set(cfg.get("done") or [])
+    (done.discard if url in done else done.add)(url)
+    cfg["done"] = sorted(done)
+    st.session_state["watch_cfg"] = cfg
+    try:
+        store.save_file(GH_TOKEN, GH_GIST, WATCH_CFG, cfg)
+    except Exception as ex:
+        st.session_state["watch_err"] = f"تعذّر حفظ علامة «خلصته» ({type(ex).__name__})"
+
+
+def render_watch():
+    """تقرير مخصص بالكلمات والعلاقات: زر واحد يشغّله على GitHub Actions، والنتيجة محفوظة (للمالك)"""
+    with st.expander("🎯 تقرير مخصص بكلمات ومواضيع معينة (زرار واحد، والنتيجة بتفضل محفوظة)", expanded=False):
+        if not (GH_TOKEN and GH_GIST):
+            st.info("محتاج التخزين الدائم (GITHUB_TOKEN وGIST_ID).")
+            return
+        data, cfg = _watch_load()
+        tok, repo, branch = _sec("ACTIONS_TOKEN"), _sec("GH_REPO") or gh_actions.DEFAULT_REPO, _sec("GH_BRANCH") or "main"
+        st.caption("اكتب مواضيعك، دوس زرار «شغّل»، وسيبه يشتغل على GitHub (ممكن ياخد من ربع ساعة لساعة، مش لازم تفضل فاتح التطبيق). "
+                   "لما يخلص هتلاقي كل الاخبار هنا: ترجمة العنوان والمقال والملخص وعدد مرات ذكر الكلمات. وبتفضل محفوظة لحد ما تشغّل بحث جديد.")
+        with st.expander("⚙️ المواضيع والاعدادات", expanded=data is None):
+            txt = st.text_area("المواضيع (سطر لكل موضوع. + يعني الكلمتين مع بعض، | يعني بدائل، # تعليق)", height=280, key="watch_txt",
+                               value=cfg.get("topics") or watch_mod.DEFAULT_TOPICS)
+            c1, c2, c3 = st.columns(3)
+            wdays = c1.select_slider("الفترة (ايام)", options=[1, 2, 3, 4], value=int(cfg.get("days") or 2), key="watch_days")
+            per = c2.slider("اخبار لكل موضوع", 3, 20, int(cfg.get("per") or 10), key="watch_per")
+            deep = c3.slider("اقرا وترجم اول كام خبر", 0, 10, int(cfg["deep"]) if cfg.get("deep") is not None else 5, key="watch_deep")
+            keys_sel = st.multiselect("ادور في ايه؟", list(WATCH_SCOPES), default=[k for k in (cfg.get("scopes") or list(WATCH_SCOPES)) if k in WATCH_SCOPES],
+                                      format_func=lambda k: WATCH_SCOPES[k], key="watch_scopes")
+        if not tok:
+            st.warning("زرار التشغيل محتاج ACTIONS_TOKEN في Secrets (نفس اللي عملناه للتقرير اليومي).")
+        lr = None
+        if tok:
+            try:
+                lr = gh_actions.last_run(tok, repo, "watch.yml")
+            except Exception as ex:
+                st.caption(f"تعذّر قراءة حالة التشغيل ({type(ex).__name__}). اتأكد انك رفعت ملف watch.yml.")
+        busy = bool(lr and lr["status"] in ("queued", "in_progress", "waiting", "requested"))
+        if lr:
+            ico = {"success": "✅ خلص", "failure": "❌ فشل", "cancelled": "⚪ اتلغى"}.get(lr["conclusion"] or "", "⏳ شغال دلوقتي" if busy else "—")
+            when = keys_mod.parse(lr["created"])
+            wt = when.astimezone(core.TZ).strftime("%Y-%m-%d %H:%M") if when else ""
+            st.markdown(f"آخر تشغيل: **{ico}** — بدأ {wt} (القاهرة) · [التفاصيل]({lr['url']})")
+        b1, b2 = st.columns(2)
+        if b1.button("▶️ شغّل البحث الكبير دلوقتي", type="primary", disabled=busy or not tok, key="watch_go", use_container_width=True):
+            ts = watch_mod.parse_topics(txt)
+            if not ts or not keys_sel:
+                st.warning("اكتب موضوع واحد على الاقل واختار قسم واحد.")
+            else:
+                new_cfg = {**cfg, "topics": txt, "days": wdays, "per": per, "deep": deep, "scopes": keys_sel}
+                try:
+                    store.save_file(GH_TOKEN, GH_GIST, WATCH_CFG, new_cfg)
+                    st.session_state["watch_cfg"] = new_cfg
+                    ok, msg = gh_actions.dispatch(tok, repo, branch, "watch.yml")
+                    (st.success if ok else st.error)(msg + (" ولما يخلص دوس «حدّث» تحت." if ok else ""))
+                except Exception as ex:
+                    st.error(f"مقدرتش ابدأ ({type(ex).__name__}).")
+        if b2.button("🔁 حدّث (هات اخر نتيجة)", key="watch_refresh", use_container_width=True):
+            _watch_load(force=True)
+            st.rerun()
+        if st.session_state.pop("watch_err", None):
+            st.warning("علامة «خلصته» ما اتحفظتش في المرة الاخيرة.")
+        if not data:
+            st.info("لسه مفيش نتيجة محفوظة. دوس «شغّل» وبعد ما يخلص دوس «حدّث».")
+            return
+        done = set(cfg.get("done") or [])
+        created = keys_mod.parse(data.get("created"))
+        ct = created.astimezone(core.TZ).strftime("%Y-%m-%d %H:%M") if created else ""
+        st.markdown(f"### النتيجة المحفوظة — اتعملت {ct} (القاهرة) · اخر {data.get('days')} يوم")
+        if not data.get("done", True):
+            st.warning("ده تقرير مبدئي: الروابط والعناوين جاهزة، والمقالات المترجمة والملخصات لسه بتتجهز. دوس «حدّث» بعد شوية.")
+        st.caption(f"اتفحص {data.get('n_sources')} موقع، وقريت {data.get('n_pool')} عنوان مباشرة.")
+        scope_names = data.get("scope_names") or []
+        f1, f2, f3 = st.columns([2, 2, 1])
+        scope_f = f1.selectbox("القسم", ["الكل"] + scope_names, key="watch_f_scope")
+        topic_f = f2.selectbox("الموضوع", ["الكل"] + [t["title"] for t in data["topics"]], key="watch_f_topic")
+        hide_done = f3.checkbox("اخفي اللي خلصته", value=False, key="watch_f_done")
+        shown = 0
+        for t in data["topics"]:
+            if topic_f != "الكل" and t["title"] != topic_f:
+                continue
+            items = [a for a in t["items"] if (scope_f == "الكل" or scope_f in (a.get("scopes") or [])) and not (hide_done and a["url"] in done)]
+            if not items and topic_f == "الكل":
+                continue
+            with st.expander(f"{t['title']} — {len(items)} خبر", expanded=topic_f != "الكل"):
+                for i, a in enumerate(items):
+                    shown += 1
+                    ttl = (a.get("title_ar") or a.get("title") or "").replace("[", "(").replace("]", ")")
+                    mark = "✅ " if a["url"] in done else ""
+                    st.markdown(f"**{mark}[{ttl}]({a['url']})**  \n{source_name(a.get('domain', ''))} · {fmt_seen(a.get('seendate', ''))}")
+                    if a.get("fetched") and a.get("mcount") is not None:
+                        st.caption(f"الكلمات اتذكرت {a['mcount']} مرة في مقال حوالي {a.get('words', 0)} كلمة — مستوى: {a.get('mlevel', '')}")
+                    for p in a.get("points_ar", []):
+                        st.markdown(f"- {p}")
+                    rl = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a.get('title', '')[:200], safe='')}{auth_qs()}"
+                    st.markdown(f"[📖 افتح المقال مترجم]({rl})")
+                    if a.get("full_ar"):
+                        with st.expander("المقال مترجم (اول جزء)"):
+                            st.write(a["full_ar"])
+                    st.checkbox("خلصته", value=a["url"] in done, key=f"wd_{t['title']}_{i}_{abs(hash(a['url']))}",
+                                on_change=_watch_done_toggle, args=(a["url"],))
+        if not shown:
+            st.caption("مفيش اخبار بالفلاتر دي.")
+        if data.get("overlap"):
+            with st.expander("🔗 اخبار تخص اكتر من موضوع"):
+                for a, ts in data["overlap"]:
+                    ttl = (a.get("title_ar") or a.get("title") or "").replace("[", "(").replace("]", ")")
+                    st.markdown(f"- [{ttl}]({a['url']}) ⟵ {' | '.join(ts)}")
+        with st.expander("ملاحظات فنية"):
+            for n in (data.get("notes") or [])[:40]:
+                st.caption(n)
+        md = watch_mod.to_markdown(data, source_name, fmt_seen)
+        st.download_button("⬇️ نزّل التقرير (ملف نصي)", md, file_name="custom_report.md", key="watch_dl")
+        with st.expander("📋 نسخ التقرير كنص (تلصقه عند اي ذكاء اصطناعي)"):
+            st.code(md, language=None)
+
+
 with tab_dr:
+    if IS_ADMIN:
+        render_watch()
     render_daily()
 
 with tab_sv:
