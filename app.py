@@ -350,8 +350,11 @@ def reader_page():
             "لقراءته كاملاً: افتح الرابط الأصلي بحسابك المشترك، أو اقرأ التغطية البديلة المفتوحة أسفل الصفحة."
         )
         trunc_alt = True
-    if art.get("via"):
-        st.info(f"الموقع رفض فتح المقال مباشرة، فجلبته لك عن طريق: {art['via']}. (النص قد يختلف شكله قليلاً عن الأصل.)")
+    via = art.get("via") or "غير معروفة (نسخة محفوظة من قبل)"
+    if via.startswith("الفتح المباشر"):
+        st.success(f"🟢 طريقة جلب المقال: {via}")
+    else:
+        st.info(f"🟡 طريقة جلب المقال: {via} — لأن الموقع رفض فتحه مباشرة. (النص قد يختلف شكله قليلاً عن الأصل.)")
     if art["date"]:
         st.markdown(f"🕒 **تاريخ النشر (حسب بيانات المصدر):** {art['date']}")
     if seen:
@@ -1985,7 +1988,7 @@ def render_watch():
                     mark = "✅ " if a["url"] in done else ""
                     st.markdown(f"**{mark}[{ttl}]({a['url']})**  \n{source_name(a.get('domain', ''))} · {fmt_seen(a.get('seendate', ''))}")
                     if a.get("fetched") and a.get("mcount") is not None:
-                        st.caption(f"الكلمات اتذكرت {a['mcount']} مرة في مقال حوالي {a.get('words', 0)} كلمة — مستوى: {a.get('mlevel', '')}")
+                        st.caption(f"الكلمات اتذكرت {a['mcount']} مرة في مقال حوالي {a.get('words', 0)} كلمة — مستوى: {a.get('mlevel', '')}" + (f" — اتجاب بـ: {a['via']}" if a.get("via") else ""))
                     for p in a.get("points_ar", []):
                         st.markdown(f"- {p if core._HAS_AR.search(p) else _tr_cached(p)}")
                     rl = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a.get('title', '')[:200], safe='')}{auth_qs()}"

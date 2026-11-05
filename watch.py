@@ -217,6 +217,7 @@ def build_report(topics, sel, days, per_topic=8, deep=3, progress=None, scopes=N
             a["fetched"] = bool(art)
             if not art:
                 return
+            a["via"] = art.get("via", "")
             m = matchers[(ti, a.get("alt", 0))]
             a["mcount"], a["words"] = core.count_mentions(art["text"], m)
             a["mlevel"] = core.mention_level(a["mcount"], a["words"], core.find_mentions(a.get("title", ""), m, "OR")[0])

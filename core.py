@@ -510,6 +510,7 @@ def fetch_article(url):
             if len(d["text"]) < 80:
                 FETCH_WHY[url] = "الصفحة وصلت لكن لم يُعثر فيها على نص مقال (قد تُحمَّل بالجافاسكربت)"
                 return None
+            d.setdefault("via", "الفتح المباشر من الموقع")
             _ART_CACHE[url] = d
             return d
         except Exception as e:
