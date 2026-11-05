@@ -624,22 +624,33 @@ def add_source():
 def add_writer():
     ss = st.session_state
     en = (ss.get("mw_en", "") or "").strip()
-    sites = [d for d in (clean_domain(x) for x in re.split(r"[,\s]+", ss.get("mw_sites", ""))) if DOMAIN_RE.match(d)]
-    if not en or not sites:
-        return flash("⚠️ أدخل اسم الكاتب بالإنجليزية (للبحث) ودومين موقع واحداً على الأقل.")
-    ar = (ss.get("mw_ar", "") or "").strip() or tr(en, "en", "ar")
+    ar = (ss.get("mw_ar", "") or "").strip()
+    tw = core.twitter_handle(ss.get("mw_tw", ""))
+    sites = [d for d in (clean_domain(x) for x in re.split(r"[,\s]+", ss.get("mw_sites", ""))) if DOMAIN_RE.match(d) and d not in ("x.com", "twitter.com")]
+    country = {"أمريكي": "US", "بريطاني": "UK", "إسرائيلي": "IL", "سعودي": "SA", "خليجي": "GCC", "مصري": "EG", "عربي آخر": "AR"}[ss.get("mw_country", "أمريكي")]
+    msg = lambda m: ss.__setitem__("mw_msg", m)
+    if not (en or ar):
+        return msg("⚠️ اكتب اسم الكاتب (بالعربي او بالانجليزي).")
+    if country in ("US", "UK", "IL") and not sites:
+        return msg("⚠️ الكاتب الاجنبي محتاج دومين موقع نشر واحد على الاقل (مثل nytimes.com).")
+    if country not in ("US", "UK", "IL") and not (tw or sites):
+        return msg("⚠️ للكاتب العربي لازم تكتب حساب تويتر (مثل @alfihrest) او موقع نشر.")
+    if ss.get("mw_tw", "").strip() and not tw:
+        return msg("⚠️ حساب تويتر مش مفهوم. اكتبه زي @name او الصق رابط الحساب.")
+    ar = ar or (tr(en, "en", "ar") if en else "")
+    en = en or ar
     heb = (ss.get("mw_heb", "") or "").strip()
-    country = {"أمريكي": "US", "بريطاني": "UK", "إسرائيلي": "IL"}[ss.get("mw_country", "أمريكي")]
-    wid = "c_" + hashlib.md5((en + ",".join(sites)).encode()).hexdigest()[:8]
+    wid = "c_" + hashlib.md5((en + tw + ",".join(sites)).encode()).hexdigest()[:8]
     if any(w["id"] == wid for w in S()["writers"]):
-        return flash("هذا الكاتب مضاف مسبقاً.")
+        return msg("الكاتب ده مضاف قبل كده.")
     S()["writers"].append(
-        {"id": wid, "name_ar": ar, "name_en": en, "outlet": (ss.get("mw_outlet", "") or "").strip() or sites[0],
+        {"id": wid, "name_ar": ar, "name_en": en, "outlet": (ss.get("mw_outlet", "") or "").strip() or (f"تويتر @{tw}" if tw else sites[0]),
          "country": country, "kind": ss.get("mw_kind", "رأي"), "sites": sites, "aliases": [],
-         "heb": [heb, sites] if heb else None}
+         "heb": [heb, sites] if heb and sites else None, "twitter": tw}
     )
     persist()
-    flash(f"✅ أُضيف الكاتب «{ar}» — يظهر في تاب «كتّاب ومحللون».")
+    msg(f"✅ اتضاف الكاتب «{ar}»" + (f" (تويتر @{tw})" if tw else "") + " — هتلاقيه في تاب «كتّاب ومحللون» تحت قسم "
+        + GROUP_LABELS.get(country, "") + ". وتقدر تلاقيه تحت في «ما أضفتَه».")
 
 
 def remove_source(dom, group):
@@ -684,6 +695,8 @@ def do_analyze():
         ss["ms_lang"] = "عبري" if res.get("lang") == "he" else "إنجليزي"
         ss["mw_sites"], ss["mw_outlet"] = res["domain"], ss["ms_name"]
         ss["mw_country"] = {"il": "إسرائيلي", "uk": "بريطاني", "us": "أمريكي"}[g]
+    if (res.get("tweet") or {}).get("handle"):
+        ss["mw_tw"] = res["tweet"]["handle"]
     if res.get("authors"):
         ss["mw_pick"] = res["authors"][0]["raw"]
         fill_author(0)
@@ -1590,7 +1603,8 @@ with tab_ml:
 
 
 
-GROUP_LABELS = {"US": "🇺🇸 أمريكيون", "UK": "🇬🇧 بريطانيون", "IL": "🇮🇱 إسرائيليون"}
+GROUP_LABELS = {"US": "🇺🇸 أمريكيون", "UK": "🇬🇧 بريطانيون", "IL": "🇮🇱 إسرائيليون", "SA": "🇸🇦 سعوديون (حسابات تويتر وغيرها)",
+                "GCC": "🌍 خليجيون", "EG": "🇪🇬 مصريون", "AR": "🌍 عرب آخرون"}
 
 
 def current_writers():
@@ -1778,14 +1792,19 @@ def render_manage():
     st.radio("لغة المصدر", ["إنجليزي", "عبري", "كلاهما", "تركي", "فارسي", "أمهري", "عربي"], key="ms_lang", horizontal=True)
     st.button("➕ أضف المصدر", on_click=add_source, use_container_width=True, key="ms_add")
     st.markdown("#### ➕ إضافة ككاتب")
-    st.text_input("اسم الكاتب بالإنجليزية (يُستخدم في البحث)", key="mw_en")
-    st.text_input("الاسم بالعربية (للعرض)", key="mw_ar")
+    st.caption("للكاتب العربي من تويتر: اكتب اسمه بالعربي + حسابه (@name) + اختار الجنسية «سعودي» او «خليجي»... ومش لازم دومين. "
+               "للكاتب الاجنبي: اسمه بالانجليزي + دومين موقع النشر.")
+    st.text_input("الاسم بالعربية (للعرض والبحث)", key="mw_ar")
+    st.text_input("حساب تويتر/X (مثال: @alfihrest او رابط الحساب)", key="mw_tw", placeholder="@alfihrest")
+    st.text_input("اسم الكاتب بالإنجليزية (للكاتب الاجنبي، او اختياري)", key="mw_en")
+    st.text_input("المنفذ / الصحيفة (اختياري)", key="mw_outlet")
+    st.text_input("مواقع نشره (اختياري للعربي — دومين او اكتر بفاصلة)", key="mw_sites")
     st.text_input("الاسم بالعبرية (اختياري — لمواقع عبرية)", key="mw_heb")
-    st.text_input("المنفذ / الصحيفة", key="mw_outlet")
-    st.text_input("مواقع نشره (دومين أو أكثر بفاصلة)", key="mw_sites")
-    st.radio("جنسية المنفذ", ["أمريكي", "بريطاني", "إسرائيلي"], key="mw_country", horizontal=True)
+    st.radio("جنسية الكاتب / المنفذ", ["سعودي", "خليجي", "مصري", "عربي آخر", "أمريكي", "بريطاني", "إسرائيلي"], key="mw_country", horizontal=True)
     st.radio("نوع كتاباته", ["رأي", "تحليل", "خبر"], key="mw_kind", horizontal=True)
     st.button("➕ أضف الكاتب", on_click=add_writer, use_container_width=True, key="mw_add")
+    if st.session_state.get("mw_msg"):
+        (st.success if st.session_state["mw_msg"].startswith("✅") else st.warning)(st.session_state["mw_msg"])
     st.markdown("#### ما أضفتَه")
     if not S()["sources"] and not S()["writers"]:
         st.caption("لم تضف شيئاً بعد.")
@@ -1795,7 +1814,7 @@ def render_manage():
         r2.button("حذف", key=f"rs_{x['domain']}_{x['group']}", on_click=remove_source, args=(x["domain"], x["group"]))
     for w in S()["writers"]:
         r1, r2 = st.columns([4, 1])
-        r1.markdown(f"✍️ **{w['name_ar']}** ({w['name_en']}) — {w['outlet']} — `{', '.join(w['sites'])}`")
+        r1.markdown(f"✍️ **{w['name_ar']}** ({w['name_en']}) — {w['outlet']} — `{', '.join(w['sites'])}`" + (f" — 🐦 @{w['twitter']}" if w.get("twitter") else ""))
         r2.button("حذف", key=f"rw_{w['id']}", on_click=remove_writer, args=(w["id"],))
     if not PERSIST:
         st.caption("⚠️ بدون التخزين الدائم تضيع هذه الإضافات عند تحديث الصفحة؛ نزّل نسخة احتياطية من تاب «المحفوظات».")

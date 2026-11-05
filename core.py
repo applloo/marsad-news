@@ -1060,7 +1060,7 @@ def enrich_items(items, matchers, joiner="AND", limit=40, workers=8):
 
 _DC = "{http://purl.org/dc/elements/1.1/}"
 _ATOM = "{http://www.w3.org/2005/Atom}"
-COUNTRY_EN = {"US": "United States", "UK": "United Kingdom", "IL": "Israel"}
+COUNTRY_EN = {"US": "United States", "UK": "United Kingdom", "IL": "Israel", "SA": "Saudi Arabia", "GCC": "Gulf", "EG": "Egypt", "AR": "Arab world"}
 
 
 def _to_utc(s):
@@ -1169,6 +1169,59 @@ def _host(u):
     return h[4:] if h.startswith("www.") else h
 
 
+NITTER = ["nitter.net", "xcancel.com", "nitter.poast.org", "nitter.privacydev.net", "nitter.tiekoetter.com", "nitter.space"]
+
+
+def twitter_handle(x):
+    """يستخرج اسم الحساب من @name أو رابط تويتر/X"""
+    x = (x or "").strip()
+    m = re.search(r"(?:twitter\.com|x\.com)/(?:#!/)?@?([A-Za-z0-9_]{1,15})", x)
+    if m:
+        return m.group(1)
+    m = re.match(r"^@?([A-Za-z0-9_]{1,15})$", x)
+    return m.group(1) if m else ""
+
+
+def fetch_twitter(handle, days):
+    """أحدث تغريدات حساب بلا حساب ولا مفتاح: عبر خلاصات Nitter العامة، ثم بالمعاينة المضمّنة. يعيد (entries, ملاحظة)"""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    errs = []
+    for inst in NITTER:
+        try:
+            r = requests.get(f"https://{inst}/{handle}/rss", headers=UA, timeout=12)
+            r.raise_for_status()
+            out = []
+            for e in parse_feed(r.content):
+                if not e["date"] or e["date"] < cutoff:
+                    continue
+                sid = re.search(r"/status/(\d+)", e["link"] or "")
+                if not sid:
+                    continue
+                out.append({"title": e["title"], "link": f"https://x.com/{handle}/status/{sid.group(1)}", "date": e["date"],
+                            "source_url": "https://x.com", "source_name": "X"})
+            return out, f"تويتر @{handle} ⟵ {len(out)} تغريدة (عبر {inst})"
+        except Exception as ex:
+            errs.append(f"{inst}:{type(ex).__name__}")
+    try:
+        r = requests.get(f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{handle}", headers=BROWSER_HEADERS, timeout=15)
+        r.raise_for_status()
+        m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+        data = json.loads(m.group(1))
+        out = []
+        for en in data["props"]["pageProps"]["timeline"]["entries"]:
+            t = (en.get("content") or {}).get("tweet") or {}
+            if not t.get("id_str"):
+                continue
+            dt = datetime.strptime(t["created_at"], "%a %b %d %H:%M:%S %z %Y").astimezone(timezone.utc)
+            if dt >= cutoff:
+                out.append({"title": _html.unescape(t.get("full_text") or t.get("text") or ""), "link": f"https://x.com/{handle}/status/{t['id_str']}",
+                            "date": dt, "source_url": "https://x.com", "source_name": "X"})
+        return out, f"تويتر @{handle} ⟵ {len(out)} تغريدة (عبر المعاينة المضمّنة)"
+    except Exception as ex:
+        errs.append(f"syndication:{type(ex).__name__}")
+    return [], f"تويتر @{handle} ⟵ تعذّر جلب التغريدات (تويتر يحجب الأدوات الآلية): " + " | ".join(errs)
+
+
 def fetch_writer(w, days):
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     items, notes = [], []
@@ -1188,6 +1241,11 @@ def fetch_writer(w, days):
             }
         )
 
+    if w.get("twitter"):
+        tl, tnote = fetch_twitter(w["twitter"], days)
+        for e in tl:
+            add(e, "tweet", "Arabic")
+        notes.append(f"{w['name_en']} ⟵ {tnote}")
     for f in w["feeds"]:
         try:
             got = _get_feed(f)

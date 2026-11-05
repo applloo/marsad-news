@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """قائمة الكتّاب والمحللين. عدّلها بحرية: أضف كاتباً بسطر W(...) أو احذف سطراً."""
 
-COUNTRY_EN = {"US": "United States", "UK": "United Kingdom", "IL": "Israel"}
+COUNTRY_EN = {"US": "United States", "UK": "United Kingdom", "IL": "Israel", "SA": "Saudi Arabia", "GCC": "Gulf", "EG": "Egypt", "AR": "Arab world"}
 
 
 def _or(items, fmt):
@@ -11,11 +11,16 @@ def _or(items, fmt):
     return "(" + " OR ".join(fmt.format(i) for i in items) + ")"
 
 
-def W(id, name_ar, name_en, outlet, country, kind, sites, feeds=(), aliases=(), heb=None, default=False):
+def W(id, name_ar, name_en, outlet, country, kind, sites, feeds=(), aliases=(), heb=None, default=False, twitter=""):
     """kind: النوع الافتراضي (رأي/تحليل/خبر) — sites: مواقع النشر — feeds: خلاصات RSS لصفحة الكاتب إن وُجدت
     heb: (الاسم بالعبرية، [مواقع عبرية]) لبحث إضافي بالعبرية"""
     names = _or([name_en, *aliases], '"{}"')
-    gn = [{"q": f"{names} {_or(sites, 'site:{}')}", "hl": "en-US", "gl": "US", "ceid": "US:en", "lang": "English"}]
+    gn = []
+    if sites and name_en and country in ("US", "UK", "IL"):
+        gn.append({"q": f"{names} {_or(sites, 'site:{}')}", "hl": "en-US", "gl": "US", "ceid": "US:en", "lang": "English"})
+    if country in ("SA", "GCC", "EG", "AR"):  # كاتب عربي: بحث بالاسم العربي (داخل مواقعه إن وُجدت)
+        loc = {"SA": ("ar", "SA", "SA:ar"), "EG": ("ar", "EG", "EG:ar")}.get(country, ("ar", "SA", "SA:ar"))
+        gn.append({"q": f'"{name_ar}"' + (f" {_or(sites, 'site:{}')}" if sites else ""), "hl": loc[0], "gl": loc[1], "ceid": loc[2], "lang": "Arabic"})
     if heb:
         gn.append(
             {"q": f'"{heb[0]}" {_or(heb[1], "site:{}")}', "hl": "iw", "gl": "IL", "ceid": "IL:he", "lang": "Hebrew"}
@@ -23,7 +28,7 @@ def W(id, name_ar, name_en, outlet, country, kind, sites, feeds=(), aliases=(), 
     return {
         "id": id, "name_ar": name_ar, "name_en": name_en, "outlet": outlet, "country": country,
         "kind": kind, "feeds": list(feeds), "gn": gn, "default": default,
-        "aliases": [name_en, *aliases],
+        "aliases": [name_en, *aliases], "twitter": twitter,
     }
 
 
