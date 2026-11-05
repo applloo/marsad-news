@@ -420,6 +420,66 @@ def _fallback_text(html_text):
     return _html.unescape(m.group(1)) if m else ""
 
 
+
+def _clean_md(txt):
+    """ينظّف نص Markdown القادم من خدمة قراءة: يحذف الصور والروابط ويبقي الفقرات الطويلة"""
+    txt = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", txt)
+    txt = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", txt)
+    out = []
+    for ln in txt.splitlines():
+        ln = re.sub(r"^[#>*\-\s]+", "", ln).strip()
+        if len(ln) >= 45 or (out and len(ln) >= 25 and ln.endswith((".", "؟", "!", "?"))):
+            out.append(ln)
+    return "\n".join(out)
+
+
+def _via_jina(url):
+    r = requests.get("https://r.jina.ai/" + url, headers={**UA, "Accept": "text/plain", "X-Return-Format": "markdown"}, timeout=40)
+    r.raise_for_status()
+    body = r.text
+    title = (re.search(r"^Title:\s*(.+)$", body, re.M) or [None, ""])[1].strip()
+    if "Markdown Content:" in body:
+        body = body.split("Markdown Content:", 1)[1]
+    return {"title": title, "date": "", "text": _clean_md(body), "section": "", "fp": 0.0}, "خدمة قراءة بديلة (Jina)"
+
+
+def _via_wayback(url):
+    r = requests.get("https://archive.org/wayback/available", params={"url": url}, headers=UA, timeout=20)
+    snap = ((r.json().get("archived_snapshots") or {}).get("closest") or {}).get("url", "")
+    if not snap:
+        raise ValueError("لا نسخة مؤرشفة")
+    snap = re.sub(r"/web/(\d+)/", r"/web/\1id_/", snap, count=1)  # النسخة الخام بلا اضافات الارشيف
+    r2 = requests.get(snap, headers=BROWSER_HEADERS, timeout=30)
+    r2.raise_for_status()
+    return _extract(r2.content, r2.encoding or r2.apparent_encoding), "نسخة مؤرشفة (Wayback Machine)"
+
+
+def _via_gtranslate(url):
+    p = urlparse(url)
+    host = p.hostname.replace("-", "--").replace(".", "-") + ".translate.goog"
+    u = f"https://{host}{p.path or '/'}?" + (p.query + "&" if p.query else "") + "_x_tr_sl=auto&_x_tr_tl=ar&_x_tr_hl=ar&_x_tr_pto=wapp"
+    r = requests.get(u, headers=BROWSER_HEADERS, timeout=30)
+    r.raise_for_status()
+    d = _extract(r.content, r.encoding or r.apparent_encoding)
+    d["pre_ar"] = True
+    return d, "ترجمة جوجل للصفحة (جوجل هو اللي فتح الموقع)"
+
+
+def fetch_alternative(url, min_len=400):
+    """بدائل لما الموقع يرفض التطبيق: خدمة قراءة، ثم نسخة مؤرشفة، ثم ترجمة جوجل للصفحة. يعيد (dict, وصف) أو (None, سبب)"""
+    errs = []
+    for fn in (_via_jina, _via_wayback, _via_gtranslate):
+        try:
+            d, how = fn(url)
+            if d and len(d.get("text", "")) >= min_len:
+                d["via"] = how
+                return d, how
+            errs.append(f"{how}: نص قصير")
+        except Exception as e:
+            errs.append(f"{fn.__name__[5:]}: {type(e).__name__}")
+    return None, " | ".join(errs)
+
+
 def fetch_article(url):
     """يعيد dict بالنص أو None؛ سبب الفشل يُحفظ في FETCH_WHY[url]. الفشل لا يُخزَّن مؤقتاً فتصح المحاولة التالية"""
     if url in _ART_CACHE:
@@ -443,6 +503,10 @@ def fetch_article(url):
                 alt = _fallback_text(html_text)
                 if len(alt) > len(d["text"]):
                     d["text"] = alt
+            if len(d["text"]) < 1500:  # مقدمة فقط (اشتراك/جافاسكربت)؟ جرّب البدائل وخذ الأطول
+                d2, how = fetch_alternative(url, min_len=max(400, len(d["text"]) * 2))
+                if d2:
+                    d, FETCH_WHY[url] = d2, f"النص المباشر قصير فجُلب كاملاً عبر: {how}"
             if len(d["text"]) < 80:
                 FETCH_WHY[url] = "الصفحة وصلت لكن لم يُعثر فيها على نص مقال (قد تُحمَّل بالجافاسكربت)"
                 return None
@@ -450,7 +514,12 @@ def fetch_article(url):
             return d
         except Exception as e:
             why = f"تعذّر الفتح ({type(e).__name__})"
-    FETCH_WHY[url] = why or "تعذّر الفتح"
+    d2, how = fetch_alternative(url)
+    if d2:
+        FETCH_WHY[url] = f"الموقع رفض الطلب المباشر فجُلب المقال عبر: {how}"
+        _ART_CACHE[url] = d2
+        return d2
+    FETCH_WHY[url] = (why or "تعذّر الفتح") + " — وجرّبنا البدائل: " + how
     return None
 
 

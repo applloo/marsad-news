@@ -333,7 +333,7 @@ def reader_page():
             return
         title = art["title"] or orig_title
         title_ar = tr(title, "auto", "ar")
-        body_ar = core.translate_long(art["text"])
+        body_ar = art["text"] if art.get("pre_ar") else core.translate_long(art["text"])
         body_ok = core.translated_ok(art["text"], body_ar)
 
     if not body_ok:
@@ -350,6 +350,8 @@ def reader_page():
             "لقراءته كاملاً: افتح الرابط الأصلي بحسابك المشترك، أو اقرأ التغطية البديلة المفتوحة أسفل الصفحة."
         )
         trunc_alt = True
+    if art.get("via"):
+        st.info(f"الموقع رفض فتح المقال مباشرة، فجلبته لك عن طريق: {art['via']}. (النص قد يختلف شكله قليلاً عن الأصل.)")
     if art["date"]:
         st.markdown(f"🕒 **تاريخ النشر (حسب بيانات المصدر):** {art['date']}")
     if seen:
@@ -1871,6 +1873,12 @@ def _watch_load(force=False):
     return st.session_state.get("watch_data"), st.session_state.get("watch_cfg", {})
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _tr_cached(p):
+    r = tr(p, "auto", "ar")
+    return r if core._HAS_AR.search(r) else p
+
+
 def _watch_done_toggle(url):
     cfg = st.session_state.get("watch_cfg", {})
     done = set(cfg.get("done") or [])
@@ -1979,7 +1987,7 @@ def render_watch():
                     if a.get("fetched") and a.get("mcount") is not None:
                         st.caption(f"الكلمات اتذكرت {a['mcount']} مرة في مقال حوالي {a.get('words', 0)} كلمة — مستوى: {a.get('mlevel', '')}")
                     for p in a.get("points_ar", []):
-                        st.markdown(f"- {p}")
+                        st.markdown(f"- {p if core._HAS_AR.search(p) else _tr_cached(p)}")
                     rl = f"?view={quote(a['url'], safe='')}&seen={a.get('seendate', '')}&t={quote(a.get('title', '')[:200], safe='')}{auth_qs()}"
                     st.markdown(f"[📖 افتح المقال مترجم]({rl})")
                     if a.get("full_ar"):

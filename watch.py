@@ -104,6 +104,24 @@ def _gn_search(task, days, allowed):
     return ti, ai, items, f"اخبار Google ⟵ {q[:90]} ⟵ {len(items)}"
 
 
+def _tr_all(texts):
+    """ترجمة نقاط الملخص بإصرار: دفعات ثم محاولات فردية متباعدة لما بقي غير عربي (جوجل يبطّئنا على خوادم GitHub)"""
+    out = core._batch_tr(texts, "ar", size=6)
+    for wait in (2, 5, 10):
+        bad = [i for i, t in enumerate(out) if not core._HAS_AR.search(t) and texts[i].strip()]
+        if not bad:
+            break
+        core.time.sleep(wait)
+        for i in bad:
+            try:
+                r = core.tr(" ".join(texts[i].split()), "auto", "ar")
+                if core._HAS_AR.search(r):
+                    out[i] = r
+            except Exception:
+                pass
+    return out
+
+
 def build_report(topics, sel, days, per_topic=8, deep=3, progress=None, scopes=None, fulltext=False, checkpoint=None):
     """يبني التقرير. يعيد dict(topics=[{title, total, items}], overlap, notes, meta)"""
     prog = progress or (lambda f, m: None)
@@ -217,7 +235,7 @@ def build_report(topics, sel, days, per_topic=8, deep=3, progress=None, scopes=N
         prog(0.9, "جارٍ ترجمة النقاط…")
         flat = [(a, p) for _t, a in todo for p in a.get("_pts", [])]
         if flat:
-            trd = core._batch_tr([p for _a, p in flat], "ar")
+            trd = _tr_all([p for _a, p in flat])
             for a, _p in flat:
                 a["points_ar"] = []
             for (a, _p), t in zip(flat, trd):
