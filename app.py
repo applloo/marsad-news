@@ -97,6 +97,17 @@ a.btn:hover {background:#1e40af;}
 [data-baseweb="tabs"] button:not([role="tab"]) {display: none !important;}  /* أسهم التمرير */
 ::-webkit-scrollbar {height: 14px; width: 14px;}
 ::-webkit-scrollbar-thumb {background: rgba(128,128,128,.6); border-radius: 8px;}
+/* ألوان تابات الأقسام الاربعة (إسرائيلي/أمريكي/بريطاني/إقليمي) وحجم أكبر */
+[data-testid="stTabs"] > div:first-child [role="tablist"] button[role="tab"]:nth-child(4) {background:#c0392b !important; border-color:#e74c3c !important; color:#fff !important;}
+[data-testid="stTabs"] > div:first-child [role="tablist"] button[role="tab"]:nth-child(5) {background:#2563c9 !important; border-color:#4f8cf0 !important; color:#fff !important;}
+[data-testid="stTabs"] > div:first-child [role="tablist"] button[role="tab"]:nth-child(6) {background:#d9822b !important; border-color:#f2a655 !important; color:#fff !important;}
+[data-testid="stTabs"] > div:first-child [role="tablist"] button[role="tab"]:nth-child(7) {background:#2a8f55 !important; border-color:#4cc783 !important; color:#fff !important;}
+[data-testid="stTabs"] > div:first-child [role="tablist"] button[role="tab"]:nth-child(n+4):nth-child(-n+7) {font-weight:700; min-height:50px !important; border-radius:16px !important;}
+[data-testid="stTabs"] > div:first-child [role="tablist"] button[aria-selected="true"]:nth-child(n+4):nth-child(-n+7) {box-shadow:0 0 0 3px rgba(255,255,255,.55), 0 4px 14px rgba(0,0,0,.45);}
+.hm-stat {border:1px solid rgba(128,128,128,.3); border-radius:12px; padding:10px 12px; text-align:center;}
+.hm-stat b {display:block; font-size:1.5rem;}
+.hm-row {border:1px solid rgba(128,128,128,.28); border-radius:12px; padding:10px 12px; margin-bottom:8px;}
+.hm-tag {font-size:.75rem; padding:1px 8px; border-radius:10px; color:#fff; margin-left:6px;}
 @media (max-width:640px){ .ar-title{font-size:1.05rem;} }
 </style>
 """,
@@ -866,6 +877,7 @@ _now0 = datetime.now(timezone.utc)
 query, match, joiner, ctype = "", core.MATCH_MODES[0], "AND", "الكل"
 start_utc, end_utc, max_rec, verify, hide_nomatch = _now0 - timedelta(days=7), _now0, 30, True, False
 
+home_box = st.container()
 tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_sv, tab_ms = st.tabs(TAB_NAMES)
 
 
@@ -1326,6 +1338,104 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
                 st.warning("اكتب كلمة بحث فوق في التاب عشان البحث داخل النص.")
     render_results(key)
 
+
+HOME_SECTIONS = {"il": ("اسرائيلي", ISRAEL, "IL", "#c0392b"), "us": ("امريكي", USA, "US", "#2563c9"),
+                 "uk": ("بريطاني", UK, "UK", "#d9822b"), "rg": ("تركيا وايران واثيوبيا", REGION, "US", "#2a8f55")}
+HOME_GD = {"il": "IS", "us": "US", "uk": "UK", "rg": None}
+
+
+def _ago(seen):
+    try:
+        dt = datetime.strptime(seen, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        m = int((datetime.now(timezone.utc) - dt).total_seconds() // 60)
+        return f"منذ {m} دقيقة" if m < 60 else (f"منذ {m // 60} ساعة" if m < 2880 else f"منذ {m // 1440} يوم")
+    except Exception:
+        return ""
+
+
+def home_search(q, keys, days, join, bar, use_gd=False):
+    terms = [t.strip() for t in TERM_SPLIT.split(q) if t.strip()]
+    got = {}
+    for n, key in enumerate(keys):
+        label, groups, gn_c, _col = HOME_SECTIONS[key]
+        bar.progress(n / max(1, len(keys)), text=f"جارٍ البحث في القسم {label}…")
+        sel = all_entries(key, groups)
+        try:
+            g_items, g_notes = core.gnews_site_search(sel, days, terms=terms, joiner=join, country=gn_c, max_items=80)
+            d_items, d_notes = core.direct_headlines(sel, days)
+            m = core.make_matchers(terms, core.codes_for(sel))
+            d_hits = [a for a in d_items if core.find_mentions(a.get("title", ""), m, join)[0]]
+            gd_items = []
+            if use_gd:
+                now_ = datetime.now(timezone.utc)
+                last = None
+                for ev in core.search_iter(terms, join, core.MATCH_MODES[0], core.jobs_for_sources(sel, HOME_GD[key]),
+                                           now_ - timedelta(days=days), now_, 60, "الكل"):
+                    if ev["items"] is not None:
+                        last = ev["items"]
+                gd_items = last or []
+                g_notes = g_notes + [f"GDELT ⟵ {len(gd_items)} نتيجة"]
+            items = core.merge_items(g_items, d_hits, gd_items)
+            core.translate_titles(items)
+        except Exception as ex:
+            items, g_notes, d_notes = [], [f"تعذّر ({type(ex).__name__})"], []
+        dd = {"items": items, "errors": [] if items else ["لا نتائج في الفترة دي. جرب فترة اطول او كلمات تانية."],
+              "used": g_notes + d_notes, "summaries": {}, "counts": {}, "silent": [], "hidden": 0, "hl": []}
+        update_meta(dd, sel)
+        st.session_state[f"res_{key}"] = dd
+        got[key] = items
+    bar.progress(1.0, text="تم")
+    merged = []
+    for key, its in got.items():
+        for a in its:
+            merged.append({**a, "_sec": key})
+    merged.sort(key=lambda a: a.get("seendate", ""), reverse=True)
+    st.session_state["res_home"] = {"items": merged[:150], "q": q, "counts": {k: len(v) for k, v in got.items()},
+                                    "days": days, "errors": [], "used": [], "summaries": {}}
+
+
+def render_home():
+    st.markdown("#### 🏠 الرئيسية")
+    q = st.text_input("🔎 ابحث في كل الاقسام مرة واحدة", key="home_q", placeholder="مثال: سد النهضة، مصر السعودية، سيناء")
+    c1, c2, c3 = st.columns([3, 2, 2])
+    keys = c1.multiselect("الاقسام", list(HOME_SECTIONS), default=list(HOME_SECTIONS), format_func=lambda k: HOME_SECTIONS[k][0], key="home_secs")
+    days = c2.select_slider("الفترة (ايام)", options=[1, 2, 3, 5, 7, 14, 30], value=3, key="home_days")
+    jl = c3.radio("لو اكتر من كلمة", ["اي منها", "كلها"], key="home_join")
+    use_gd = st.checkbox("🌐 ضم GDELT (ادق وابطأ)", value=False, key="home_gd",
+                         help="بيضيف نتايج GDELT لكل قسم. اتأخر من 3 لـ 8 دقايق. استخدمه للمواضيع المهمة.")
+    if st.button("🔎 ابحث في كل الاقسام", type="primary", use_container_width=True, key="home_go"):
+        if not q.strip() or not keys:
+            st.warning("اكتب كلمة بحث واختار قسم واحد على الاقل.")
+        else:
+            bar = st.progress(0.0, text="بدأنا…")
+            home_search(q, keys, days, "AND" if jl == "كلها" else "OR", bar, use_gd)
+            bar.empty()
+    h = st.session_state.get("res_home")
+    now_utc0 = datetime.now(timezone.utc).strftime("%Y%m%d")
+    all_items = [a for k in HOME_SECTIONS for a in (st.session_state.get(f"res_{k}") or {}).get("items", [])]
+    today_n = sum(1 for a in all_items if str(a.get("seendate", "")).startswith(now_utc0))
+    s1, s2, s3 = st.columns(3)
+    n_src = len({d for g in (ISRAEL, USA, UK, REGION) for ents in g.values() for _, d, _ in ents})
+    for col, num, lab in ((s1, today_n, "خبر النهارده (في نتايجك)"), (s2, len(all_items), "خبر محفوظ في الاقسام"), (s3, n_src, "مصدر مراقب")):
+        col.markdown(f"<div class='hm-stat'><b>{num}</b>{lab}</div>", unsafe_allow_html=True)
+    if not h:
+        st.caption("اكتب كلمة وادوس «ابحث في كل الاقسام»، وهتلاقي هنا اخر الاخبار من كل الاقسام مرتبة بالاحدث، وتفاصيل كل قسم في التاب بتاعه تحت.")
+        return
+    cnt = " · ".join(f"{HOME_SECTIONS[k][0]}: {n}" for k, n in h.get("counts", {}).items())
+    st.markdown(f"**نتيجة «{html.escape(h.get('q', ''))}»** — اخر {h.get('days')} يوم — {cnt}")
+    st.caption("دي اخر الاخبار مجمعة. للتفاصيل (ملخص، ترجمة المقال، حفظ) افتح تاب القسم تحت.")
+    for a in h["items"][:25]:
+        sec = HOME_SECTIONS.get(a.get("_sec"), ("", None, "", "#555"))
+        ttl = html.escape(a.get("title_ar") or a.get("title") or "")
+        st.markdown(
+            f"<div class='hm-row'><span class='hm-tag' style='background:{sec[3]}'>{sec[0]}</span>"
+            f"<a href='{html.escape(a.get('url', ''))}' target='_blank'><b>{ttl}</b></a><br>"
+            f"<span class='meta'>{src_label(a.get('domain', ''), False)} · {_ago(a.get('seendate', ''))}</span></div>",
+            unsafe_allow_html=True)
+
+
+with home_box:
+    render_home()
 
 with tab_il:
     use_filters("il", "full")
