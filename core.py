@@ -1145,7 +1145,7 @@ def decode_gnews(url):
             if sg and ts:
                 break
         else:
-            return url
+            return _gn_redirect(url)
         inner = (
             '["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],'
             f'"X","X",1,[1,1,1],1,1,null,0,0,null,0],"{gid}",{ts.group(1)},"{sg.group(1)}"]'
@@ -1159,9 +1159,23 @@ def decode_gnews(url):
         )
         parsed = json.loads(r.text.split("\n\n")[1])[:-2]
         out = json.loads(parsed[0][2])[1]
-        return out if str(out).startswith("http") else url
+        return out if str(out).startswith("http") else _gn_redirect(url)
     except Exception:
-        return url
+        return _gn_redirect(url)
+
+
+def _gn_redirect(url):
+    """بديل لفك رابط جوجل: متابعة التحويل كأنه متصفح (مع موافقة الكوكيز)، او قراءة الرابط من الصفحة"""
+    try:
+        r = requests.get(url, headers=BROWSER_HEADERS, cookies={"CONSENT": "YES+cb.20240101-00-p0.en+FX+000"}, allow_redirects=True, timeout=15)
+        if _host(r.url) not in ("news.google.com", "consent.google.com", ""):
+            return r.url
+        m = re.search(r'data-n-au="(https?://[^"]+)"', r.text) or re.search(r'<a[^>]+href="(https?://(?!news\.google|consent\.google|www\.google)[^"]+)"[^>]*jsname', r.text)
+        if m:
+            return _html.unescape(m.group(1))
+    except Exception:
+        pass
+    return url
 
 
 def _host(u):

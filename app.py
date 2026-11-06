@@ -321,28 +321,79 @@ def copy_block(url, title, title_ar, art, body_ar):
         st.download_button("⬇️ نزّله كملف نصي (.txt)", txt, file_name="article.txt", mime="text/plain", use_container_width=True, key="cp_dl")
 
 
+def reader_head(title_en, url, wr, outlet, title_ar=""):
+    """رأس صفحة المقال: العنوان بالعربي والأصلي + الجريدة + الكاتب + الموقع"""
+    if title_en:
+        title_ar = title_ar or tr(title_en, "auto", "ar")
+        st.markdown(f"### {title_ar}")
+        st.markdown(f"<div class='ltr' dir='ltr'>{html.escape(title_en)}</div>", unsafe_allow_html=True)
+    bits = []
+    if outlet:
+        bits.append(f"📰 **الجريدة:** {html.escape(outlet)}")
+    if wr:
+        bits.append(f"✍️ **الكاتب:** {html.escape(wr)}")
+    host = core._host(url)
+    if host and host != "news.google.com":
+        bits.append(f"🌐 **الموقع:** {src_label(host)}")
+    if bits:
+        st.markdown("  \n".join(bits), unsafe_allow_html=True)
+
+
+def search_suggestions(title):
+    """اقتراحات بحث بالعنوان في مصادر تانية (روابط تفتح في تاب جديد)"""
+    q = re.sub(r"\s+[-|–]\s+[^-|–]{2,40}$", "", (title or "").strip())[:140]
+    if len(q) < 6:
+        return
+    from urllib.parse import quote_plus
+    qq = quote_plus(q)
+    st.markdown("### 🔎 اقتراحات بحث بالعنوان في مصادر تانية")
+    sites = [("Google", f"https://www.google.com/search?q={qq}"), ("أخبار Google", f"https://news.google.com/search?q={qq}"),
+             ("Bing أخبار", f"https://www.bing.com/news/search?q={qq}"),
+             ("AP", f"https://www.google.com/search?q={qq}+site:apnews.com"), ("Reuters", f"https://www.google.com/search?q={qq}+site:reuters.com"),
+             ("BBC", f"https://www.google.com/search?q={qq}+site:bbc.com"), ("الجزيرة", f"https://www.google.com/search?q={qq}+site:aljazeera.net"),
+             ("Times of Israel", f"https://www.google.com/search?q={qq}+site:timesofisrael.com"),
+             ("Axios", f"https://www.google.com/search?q={qq}+site:axios.com"), ("Al-Monitor", f"https://www.google.com/search?q={qq}+site:al-monitor.com"),
+             ("Middle East Eye", f"https://www.google.com/search?q={qq}+site:middleeasteye.net"), ("X (تويتر)", f"https://x.com/search?q={qq}&f=live")]
+    st.markdown(" · ".join(f"[{n}]({u})" for n, u in sites))
+    st.caption("كل رابط بيفتح تاب جديد ببحث بعنوان المقال، علشان تلاقي نفس الخبر عند ناس تانية.")
+
+
 def reader_page():
     url = unquote(st.query_params.get("view", ""))
     seen = st.query_params.get("seen", "")
     orig_title = unquote(st.query_params.get("t", ""))
+    wr = unquote(st.query_params.get("wr", ""))
+    outlet = unquote(st.query_params.get("o", ""))
 
     st.markdown("## 📖 قراءة المقال مترجماً")
     if not url.startswith(("http://", "https://")):
         st.error("رابط غير صالح.")
         return
+    gnews_link = core._host(url) == "news.google.com"
+    if gnews_link:  # رابط أخبار جوجل: نحاول نوصل للرابط الاصلي للجريدة
+        with st.spinner("جارٍ الوصول للرابط الاصلي للمقال…"):
+            real = core.decode_gnews(url)
+        if core._host(real) != "news.google.com":
+            url, gnews_link = real, False
     st.markdown(f"🔗 **الرابط الأصلي:** [{html.escape(url)}]({url})")
-    st.markdown(f"<div class='meta'>🌐 المصدر: {src_label(core._host(url))}</div>", unsafe_allow_html=True)
+    reader_head(orig_title, url, wr, outlet)
 
     embed_browser(url)
 
     with st.spinner("جارٍ جلب المقال وترجمته…"):
-        art = core.fetch_article(url)
+        art = None if gnews_link else core.fetch_article(url)
         if not art:
-            st.warning("تعذّر استخراج نص المقال: " + core.FETCH_WHY.get(url, "جدار اشتراك أو حجب") +
-                       ". (الصفحة قد تفتح في متصفحك عادي لكن الموقع يعامل التطبيق كزائر آلي.)")
+            if gnews_link:
+                st.warning("رابط أخبار جوجل ما اتفكش (جوجل بيمنع فكّه من التطبيق). العنوان اللي فوق هو العنوان الحقيقي للمقال. "
+                           "افتح «الأصلية» من فوق في متصفحك، او استخدم الاقتراحات تحت.")
+            else:
+                st.warning("تعذّر استخراج نص المقال: " + core.FETCH_WHY.get(url, "جدار اشتراك أو حجب") +
+                           ". (الصفحة قد تفتح في متصفحك عادي لكن الموقع يعامل التطبيق كزائر آلي.)")
+            search_suggestions(orig_title or core.title_from_url(url))
             alt_block(orig_title or core.title_from_url(url), url)
             return
-        title = art["title"] or orig_title
+        title = art["title"] if art["title"] and art["title"].lower() not in ("google news", "أخبار جوجل") else orig_title
+        title = title or orig_title
         title_ar = tr(title, "auto", "ar")
         body_ar = art["text"] if art.get("pre_ar") else core.translate_long(art["text"])
         body_ok = core.translated_ok(art["text"], body_ar)
@@ -371,8 +422,9 @@ def reader_page():
     if seen:
         st.markdown(f"🛰️ **وقت رصد المقال (توقيت القاهرة):** {fmt_seen(seen)}")
 
-    st.markdown(f"### {title_ar}")
-    st.markdown(f"<div class='ltr' dir='ltr'>{html.escape(title)}</div>", unsafe_allow_html=True)
+    if not orig_title or title.strip().lower() != orig_title.strip().lower():  # العنوان ظهر فوق؛ نكرره فقط لو الصفحة لها عنوان مختلف
+        st.markdown(f"### {title_ar}")
+        st.markdown(f"<div class='ltr' dir='ltr'>{html.escape(title)}</div>", unsafe_allow_html=True)
 
     if st.button("📝 ملخص المقال في نقاط"):
         with st.spinner("جارٍ التلخيص…"):
@@ -403,6 +455,7 @@ def reader_page():
     st.markdown(f"<div class='article-body'>{paras}</div>", unsafe_allow_html=True)
     with st.expander("النص الأصلي"):
         st.text(art["text"])
+    search_suggestions(title)
     if trunc_alt:
         st.divider()
         alt_block(title, url)
@@ -1018,7 +1071,8 @@ def highlight(text, stems):
 
 def card_html(a):
     url = a.get("url", "")
-    link = f"?view={quote(url, safe='')}&seen={a.get('seendate', '')}&t={quote(a.get('title', '')[:200], safe='')}{auth_qs()}"
+    link = (f"?view={quote(url, safe='')}&seen={a.get('seendate', '')}&t={quote(a.get('title', '')[:200], safe='')}"
+            f"&wr={quote(a.get('writer', '') or '', safe='')}&o={quote(a.get('outlet', '') or '', safe='')}{auth_qs()}")
     orig = html.escape(a.get("title", ""))
     en = a.get("title_en", "")
     en_line = f"<div class='ltr' dir='ltr'>EN: {html.escape(en)}</div>" if en and en != a.get("title") else ""
