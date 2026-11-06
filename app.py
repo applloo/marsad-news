@@ -338,7 +338,7 @@ def reader_page():
 
     if not body_ok:
         st.warning("⚠️ الترجمة التلقائية للنص لم تكتمل الآن (غالباً جوجل مشغول). اضغط «أعد الترجمة» بعد لحظات، "
-                   "أو استخدم زرار «مترجمة (ترجمة جوجل)» أعلى الصفحة.")
+                   "أو استخدم زرار «مترجمة (ترجمة جوجل)» فوق في التاب.")
         if st.button("🔁 أعد الترجمة", key="rd_retry"):
             st.rerun()
     trunc_alt = False
@@ -404,7 +404,7 @@ _LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 140" width
 
 
 def show_logo(width=300):
-    """شعار المالك (Ehab Ibrahim) أعلى الصفحة"""
+    """شعار المالك (Ehab Ibrahim) فوق في التاب"""
     b = _b64.b64encode(_LOGO_SVG.encode("utf-8")).decode()
     st.markdown(f"<div style='direction:ltr;text-align:left;margin:0 0 6px'><img alt='Ehab Ibrahim' width='{width}' src='data:image/svg+xml;base64,{b}'></div>",
                 unsafe_allow_html=True)
@@ -824,49 +824,92 @@ if not IS_ADMIN and st.session_state["auth"].get("scope") == "reports":
     show_footer()
     st.stop()
 
-st.caption("اكتب بالعربية كلمة أو عدة كلمات أو جملة مركّبة — تُترجم تلقائياً إلى العبرية والإنجليزية وتُترجم النتائج للعربية.")
+# ───────── حفظ نتائج البحث: تبقى (للمالك) حتى تبحث من جديد، حتى لو انقطع الاتصال او فتحت التطبيق لاحقا ─────────
+RES_FILE = "marsad_results.json"
 
-query = st.text_input(
-    "🔎 كلمات البحث",
-    placeholder="مثال: وزير الخارجية المصري   —   أو عدة مواضيع بفاصلة: اليمن، الحوثيين، مصر السعودية",
-    help="كل ما بين فاصلتين (، أو ,) يُعامل كموضوع/عبارة مستقلة. بدون فاصلة تُعتبر الجملة كلها عبارة واحدة.",
-)
-c1, c2 = st.columns(2)
-match = c1.radio(
-    "طريقة مطابقة كل عبارة",
-    core.MATCH_MODES,
-    help="Near: الكلمات متقاربة بأي ترتيب (الأنسب للجمل). Exact: العبارة بنصّها المترجم حرفياً. AND: الكلمات موجودة في المقال في أي موضع.",
-)
-joiner_label = c2.radio("عند وجود أكثر من عبارة (بفاصلة)", ["كلها معاً (AND)", "أيٌّ منها (OR)"])
-joiner = "OR" if "OR" in joiner_label else "AND"
 
-with st.expander("⚙️ الوقت ونوع المحتوى", expanded=True):
-    ctype = st.selectbox("نوع المحتوى", ["الكل", "خبر", "تحليل", "رأي"])
-    mode = st.radio("النطاق الزمني", ["آخر ساعات", "آخر أيام", "تواريخ محددة"], horizontal=True)
-    now_utc = datetime.now(timezone.utc)
-    if mode == "آخر ساعات":
-        h = st.slider("عدد الساعات", 1, 72, 24)
-        start_utc, end_utc = now_utc - timedelta(hours=h), now_utc
-    elif mode == "آخر أيام":
-        d = st.slider("عدد الأيام", 1, 90, 7)
-        start_utc, end_utc = now_utc - timedelta(days=d), now_utc
-    else:
-        today = datetime.now(core.TZ).date()
-        rng = st.date_input("من – إلى", value=(today - timedelta(days=3), today), max_value=today)
-        if isinstance(rng, (list, tuple)) and len(rng) == 2:
-            s, e = rng
-        else:
-            s = e = rng[0] if isinstance(rng, (list, tuple)) else rng
-        start_utc = datetime(s.year, s.month, s.day, tzinfo=core.TZ).astimezone(timezone.utc)
-        end_utc = datetime(e.year, e.month, e.day, 23, 59, 59, tzinfo=core.TZ).astimezone(timezone.utc)
-    max_rec = st.slider("عدد النتائج الأقصى", 10, 100, 30, step=10)
-    verify = st.checkbox("🔍 افحص نص كل مقال واعرض جملة ذُكرت فيها كلمتك (أبطأ)", value=True)
-    hide_nomatch = st.checkbox("🚫 أخفِ المقالات التي لا تظهر كلمتك في نصها", value=False)
+def _res_sig(d):
+    its = d.get("items") or []
+    return [len(its), its[0].get("url", "") if its else "", len(d.get("summaries") or {}), len(d.get("used") or [])]
 
-with st.expander("🎧 إعدادات القراءة الصوتية (للمترو والسماعات)"):
-    tts_settings("tts")
-    st.radio("ما الذي يُقرأ عند الضغط على «🎧 استمع»؟", TTS_MODES, key="tts_mode")
-    st.caption("تُجهَّز القراءة بصوت عربي عصبي، ويمكن تنزيلها MP3 قبل نزول المترو للاستماع بلا إنترنت.")
+
+if PERSIST and "_res_loaded" not in st.session_state:
+    st.session_state["_res_loaded"] = True
+    st.session_state["_res_sigs"] = {}
+    try:
+        for _k, _v in (store.load_file(GH_TOKEN, GH_GIST, RES_FILE, {}) or {}).items():
+            if isinstance(_v, dict) and f"res_{_k}" not in st.session_state:
+                st.session_state[f"res_{_k}"] = _v
+                st.session_state["_res_sigs"][_k] = _res_sig(_v)
+    except Exception:
+        pass
+
+
+def save_results():
+    if not PERSIST:
+        return
+    sigs = st.session_state.setdefault("_res_sigs", {})
+    cur = {k[4:]: v for k, v in st.session_state.items() if k.startswith("res_") and isinstance(v, dict) and "items" in v}
+    if not cur or all(sigs.get(k) == _res_sig(v) for k, v in cur.items()):
+        return
+    try:
+        out = {k: {**v, "items": (v.get("items") or [])[:200], "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")} for k, v in cur.items()}
+        body = json.loads(json.dumps(out, ensure_ascii=False, default=str))
+        store.save_file(GH_TOKEN, GH_GIST, RES_FILE, body)
+        st.session_state["_res_sigs"] = {k: _res_sig(v) for k, v in cur.items()}
+    except Exception:
+        pass
+
+
+# ───────── التابات فوق، وكل تاب بحث يعرض فلاترَه داخله (القيم تُقرأ كمتغيرات عامة وقت تنفيذ التاب) ─────────
+_now0 = datetime.now(timezone.utc)
+query, match, joiner, ctype = "", core.MATCH_MODES[0], "AND", "الكل"
+start_utc, end_utc, max_rec, verify, hide_nomatch = _now0 - timedelta(days=7), _now0, 30, True, False
+
+tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_sv, tab_ms = st.tabs(TAB_NAMES)
+
+
+def use_filters(p, level="full"):
+    """يرسم فلاتر هذا التاب (مفاتيحها تبدأ بـ p) ويضبط المتغيرات العامة التي تقرأها دوال البحث.
+    level: full = كلمات + وقت + نوع، kw = كلمات + نوع فقط"""
+    g = globals()
+    g["query"] = st.text_input(
+        "🔎 كلمات البحث", key=f"{p}_q",
+        placeholder="مثال: وزير الخارجية المصري   —   او عدة مواضيع بفاصلة: اليمن، الحوثيين، مصر",
+        help="كل ما بين فاصلتين (، او , او . بعد كلمة عربية) يُعامل كموضوع مستقل. بدون فاصلة تُعتبر الجملة كلها عبارة واحدة. للعرض بدون كلمات استخدم «اعرض كل ما نُشر».",
+    )
+    with st.expander("⚙️ فلاتر متقدمة (المطابقة، الوقت، نوع المحتوى)" if level == "full" else "⚙️ فلاتر (نوع المحتوى وربط العبارات)"):
+        c1, c2 = st.columns(2)
+        if level == "full":
+            g["match"] = c1.radio("طريقة مطابقة كل عبارة", core.MATCH_MODES, key=f"{p}_match",
+                                  help="Near: الكلمات متقاربة بأي ترتيب (الأنسب للجمل). Exact: العبارة بنصها المترجم حرفياً. AND: الكلمات موجودة في المقال في أي موضع.")
+        jl = c2.radio("عند وجود أكثر من عبارة", ["كلها معاً (AND)", "أيٌّ منها (OR)"], key=f"{p}_join")
+        g["joiner"] = "OR" if "OR" in jl else "AND"
+        g["ctype"] = st.selectbox("نوع المحتوى", ["الكل", "خبر", "تحليل", "رأي"], key=f"{p}_ct0")
+        if level == "full":
+            mode = st.radio("النطاق الزمني", ["آخر ساعات", "آخر أيام", "تواريخ محددة"], horizontal=True, key=f"{p}_mode")
+            now_utc = datetime.now(timezone.utc)
+            if mode == "آخر ساعات":
+                h = st.slider("عدد الساعات", 1, 72, 24, key=f"{p}_h")
+                g["start_utc"], g["end_utc"] = now_utc - timedelta(hours=h), now_utc
+            elif mode == "آخر أيام":
+                d = st.slider("عدد الأيام", 1, 90, 7, key=f"{p}_d")
+                g["start_utc"], g["end_utc"] = now_utc - timedelta(days=d), now_utc
+            else:
+                today = datetime.now(core.TZ).date()
+                rng = st.date_input("من – إلى", value=(today - timedelta(days=3), today), max_value=today, key=f"{p}_rng")
+                if isinstance(rng, (list, tuple)) and len(rng) == 2:
+                    s, e = rng
+                else:
+                    s = e = rng[0] if isinstance(rng, (list, tuple)) else rng
+                g["start_utc"] = datetime(s.year, s.month, s.day, tzinfo=core.TZ).astimezone(timezone.utc)
+                g["end_utc"] = datetime(e.year, e.month, e.day, 23, 59, 59, tzinfo=core.TZ).astimezone(timezone.utc)
+            g["max_rec"] = st.slider("عدد النتائج الأقصى", 10, 100, 30, step=10, key=f"{p}_max")
+            g["verify"] = st.checkbox("🔍 افحص نص كل مقال واعرض جملة ذُكرت فيها كلمتك (أبطأ)", value=True, key=f"{p}_ver")
+            g["hide_nomatch"] = st.checkbox("🚫 أخفِ المقالات التي لا تظهر كلمتك في نصها", value=False, key=f"{p}_hide")
+    if level == "full":
+        st.caption("النتايج اللي تطلع بتفضل محفوظة، ومبتتمسحش غير لما تبحث من جديد.")
+
 
 def pick_sources(key, groups, allow_custom=True):
     custom_lang = "en" if key == "rg" else "both"
@@ -903,7 +946,7 @@ def update_meta(data, sel):
 def do_search(key, jobs, sel=None, terms=None, pre=False, seed=None):
     terms = terms or [t.strip() for t in TERM_SPLIT.split(query) if t.strip()]
     if not terms:
-        st.warning("اكتب كلمة بحث أولاً (في الخانة أعلى الصفحة).")
+        st.warning("اكتب كلمة بحث أولاً (في الخانة فوق في التاب).")
         return
     if not jobs:
         st.warning("اختر مصدراً واحداً على الأقل.")
@@ -1071,8 +1114,6 @@ def render_results(key):
                 st.button("💾 حفظ للقراءة لاحقاً", key=f"save_{key}_{i}", on_click=save_item, args=(a, key))
 
 
-tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_sv, tab_ms = st.tabs(TAB_NAMES)
-
 def all_entries(key, groups):
     out = []
     for entries in groups.values():
@@ -1217,9 +1258,9 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
         one = st.selectbox("اختر المصدر الذي تبحث بداخله", names, key=f"{key}_one")
         sel = [e for e in pool if e[0] == one][:1]
         st.caption("سيُبحث عن كلمتك داخل هذا الموقع وحده (عبر GDELT وأخبار Google معاً). المصادر التي أضفتَها من رابط تظهر أيضاً في القائمة.")
-    qm = st.radio("طريقة البحث", ["🔎 بكلمة البحث (أعلى الصفحة)", "📰 اعرض كل ما نُشر (بدون كلمات)"], horizontal=True, key=f"{key}_qm")
+    qm = st.radio("طريقة البحث", ["🔎 بكلمة البحث (فوق في التاب)", "📰 اعرض كل ما نُشر (بدون كلمات)"], horizontal=True, key=f"{key}_qm")
     if qm.startswith("📰"):
-        st.caption("هيقرا عناوين المصادر اللي اخترتها (أو المصدر الواحد) من مواقعها مباشرة (خلاصة RSS أو الصفحة الرئيسية)، ويكمّلها من أخبار Google، خلال الفترة المحددة أعلى الصفحة، من غير ما تكتب كلمة. "
+        st.caption("هيقرا عناوين المصادر اللي اخترتها (أو المصدر الواحد) من مواقعها مباشرة (خلاصة RSS أو الصفحة الرئيسية)، ويكمّلها من أخبار Google، خلال الفترة المحددة فوق في التاب، من غير ما تكتب كلمة. "
                    f"عدد المصادر دلوقتي: {len(sel)}.")
         if st.button("📰 اعرض كل ما نُشر", type="primary", use_container_width=True, key=f"goall_{key}"):
             if not sel:
@@ -1246,7 +1287,7 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
     he_raw = c2_.text_input("اسمه بالعبرية (اختياري، لدقة أعلى)", key=f"{key}_author_he") if key == "il" else ""
     if author_raw.strip():
         o1, o2 = st.columns(2)
-        with_terms = o1.checkbox("قيّد بكلمة البحث أعلى الصفحة أيضاً", value=False, key=f"{key}_awt")
+        with_terms = o1.checkbox("قيّد بكلمة البحث فوق في التاب أيضاً", value=False, key=f"{key}_awt")
         only_conf = o2.checkbox("أخفِ ما ثبت أن اسمه ليس في توقيع المقال", value=False, key=f"{key}_aoc")
     else:
         with_terms = only_conf = False
@@ -1257,7 +1298,7 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
         terms = [t.strip() for t in TERM_SPLIT.split(query) if t.strip()]
         if author_raw.strip():
             if with_terms and not terms:
-                st.warning("اكتب كلمة البحث أعلى الصفحة أو ألغِ التقييد بها.")
+                st.warning("اكتب كلمة البحث فوق في التاب أو ألغِ التقييد بها.")
             elif not sel:
                 st.warning("اختر مصدراً واحداً على الأقل.")
             else:
@@ -1282,23 +1323,27 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
                     except Exception as ex:
                         st.caption(f"تعذّر البحث المباشر في الخلاصات: {type(ex).__name__}")
             if use_body and not terms:
-                st.warning("اكتب كلمة بحث أعلى الصفحة عشان البحث داخل النص.")
+                st.warning("اكتب كلمة بحث فوق في التاب عشان البحث داخل النص.")
     render_results(key)
 
 
 with tab_il:
+    use_filters("il", "full")
     st.caption("يُترجم بحثك إلى العبرية للمصادر العبرية، وإلى الإنجليزية للنسخ الإنجليزية.")
     curated_tab("il", ISRAEL, "IS", "IL", "ابحث في المصادر الإسرائيلية")
 
 with tab_us:
+    use_filters("us", "full")
     st.caption("مصادر أمريكية مهتمة بالشرق الأوسط (Axios وغيرها) ومراكز أبحاث.")
     curated_tab("us", USA, "US", "US", "ابحث في المصادر الأمريكية")
 
 with tab_uk:
+    use_filters("uk", "full")
     st.caption("صحف وقنوات بريطانية ومصادر متخصصة بالشرق الأوسط.")
     curated_tab("uk", UK, "UK", "UK", "ابحث في المصادر البريطانية")
 
 with tab_rg:
+    use_filters("rg", "full")
     st.caption("إثيوبيا (سد النهضة والقرن الأفريقي) وتركيا (شرق المتوسط) وإيران (اليمن والخليج). يُترجم بحثك تلقائياً إلى الأمهرية "
                "أو التركية أو الفارسية أو الإنجليزية بحسب لغة كل مصدر. اختر مصدراً واحداً أو عدة مصادر أو كلها، أو ابحث داخل مصدر واحد.")
     curated_tab("rg", REGION, None, "US", "ابحث في مصادر تركيا وإيران وإثيوبيا")
@@ -1333,6 +1378,7 @@ def urlparse_path(url):
 
 
 with tab_br:
+    use_filters("br", "kw")
     st.caption("افتح مصدراً وتصفّح أقسامه (الرأي، الأخبار…) بعناوين مترجمة للعربية؛ اضغط «ترجم المقال» على أي عنوان لقراءته مترجماً، أو احفظه. "
                "بعض المواقع المدفوعة تحجب الفتح المباشر فيُستعان بأخبار Google بدلاً منه.")
     pool_all = {}
@@ -1346,7 +1392,7 @@ with tab_br:
         if scope_all.startswith("أختار"):
             chosen_src = st.multiselect("اختر المصادر", list(pool_all.keys()), default=["تايمز أوف إسرائيل", "جيروزاليم بوست", "Axios", "Al-Monitor", "The Guardian"], key="br_multi")
         bdays = st.selectbox("الفترة", list(DAY_OPTS.keys()), index=1, key="br_days")
-        use_kw = st.checkbox("اقتصر على كلمة البحث أعلى الصفحة (اتركه فارغاً لعرض كل العناوين)", value=False, key="br_kw")
+        use_kw = st.checkbox("اقتصر على كلمة البحث فوق في التاب (اتركه فارغاً لعرض كل العناوين)", value=False, key="br_kw")
         if st.button("اعرض العناوين", type="primary", use_container_width=True, key="go_br2"):
             kw = [t.strip() for t in TERM_SPLIT.split(query) if t.strip()] if use_kw else None
             sel_b = [pool_all[n] for n in chosen_src]
@@ -1550,6 +1596,7 @@ with tab_in:
         st.caption("الدومينات كتبتُها من معرفتي ولم أجرّبها كلها؛ إن لم يظهر مصدر في البحث فتحقق من دومينه.")
 
 with tab_gd:
+    use_filters("gd", "full")
     st.caption("بحث واسع في كل ما يرصده GDELT حسب بلد المصدر، دون تحديد مواقع بعينها.")
     scope = st.selectbox("المصادر", list(core.GLOBAL_SCOPES.keys()), key="gd_scope")
     if st.button("ابحث (GDELT عام)", type="primary", use_container_width=True, key="go_gd"):
@@ -1559,12 +1606,13 @@ with tab_gd:
 COUNTRIES = {"كل الدول": None, "الولايات المتحدة": "US", "بريطانيا": "UK", "إسرائيل": "IS", "البرازيل": "BR", "البرتغال": "PO", "فرنسا": "FR", "إسبانيا": "SP"}
 
 with tab_ml:
+    query = ""
     st.caption(
         "ترجم كلماتك إلى عدة لغات، **عدّل أي ترجمة بيدك أو اكتبها بنفسك**، ثم ابحث بها. "
         "كل لغة تُبحث في المقالات المنشورة بها. التركية والفارسية والأمهرية تعرض ما تقوله تلك الدول بلسانها؛ تغطية GDELT لها أضعف، فإن لم تظهر نتائج فوسّع الفترة."
     )
     src_txt = st.text_input(
-        "العبارة بالعربية (اتركها فارغة لاستخدام خانة البحث أعلى الصفحة)", key="ml_src",
+        "العبارة بالعربية", key="ml_src",
         help="افصل بين المواضيع بفاصلة.",
     )
     base_terms = [x.strip() for x in TERM_SPLIT.split(src_txt or query) if x.strip()]
@@ -1619,31 +1667,31 @@ def cached_writers(ids, days, extra_json="[]"):
     return core.translate_titles(items), notes
 
 
-with tab_wr:
-    st.caption(
-        "أحدث مقالات الرأي والتحليل لكتّاب ومراسلين مهتمين بالشرق الأوسط، بعناوين مترجمة، وزر «ترجم المقال» لقراءة النص مترجماً. "
-        "النتائج تُحفظ نصف ساعة، فالفتح المتكرر سريع."
-    )
-    days_label = st.selectbox("الفترة", list(DAY_OPTS.keys()), index=2, key="wr_days")
+def writers_panel(pfx, gcodes, btn_label, codes):
+    """قائمة كتّاب لمجموعة جنسيات + زرها الخاص ونتائجها المستقلة (pfx يفصل بين الاجانب والعرب)"""
+    days_label = st.selectbox("الفترة", list(DAY_OPTS.keys()), index=2, key=f"{pfx}_days")
     sel_ids = []
     all_w = current_writers()
-    for gcode, gname in GROUP_LABELS.items():
+    for gcode in gcodes:
+        gname = GROUP_LABELS[gcode]
         ws_ = [w for w in all_w if w["country"] == gcode]
         if not ws_:
             continue
         label_to_id = {f"{w['name_ar']} — {w['outlet']}": w["id"] for w in ws_}
         picked = st.multiselect(
             gname, list(label_to_id), default=[l for l, i in label_to_id.items() if next(w for w in ws_ if w["id"] == i)["default"]],
-            key=f"wr_{gname}",
+            key=f"{pfx}_{gname}",
         )
         sel_ids += [label_to_id[p] for p in picked]
-    use_ctype = st.checkbox("طبّق فلتر «نوع المحتوى» أعلاه", value=False, key="wr_ct")
-    use_kw = st.checkbox("اقتصر على المقالات التي تذكر كلمات البحث أعلاه (يفحص النص — أبطأ)", value=False, key="wr_kw")
-    if st.button("اعرض أحدث مقالاتهم", type="primary", use_container_width=True, key="go_wr"):
+    if pfx == "wa" and not sel_ids:
+        st.info("لسه ما اضفتش كتّاب عرب. روح تاب «مصادري» ← «إضافة ككاتب» واكتب الاسم وحساب تويتر واختار الجنسية.")
+    use_ctype = st.checkbox("طبّق فلتر «نوع المحتوى» أعلاه", value=False, key=f"{pfx}_ct")
+    use_kw = st.checkbox("اقتصر على ما يذكر كلمات البحث أعلاه (يفحص النص — أبطأ)", value=False, key=f"{pfx}_kw")
+    if st.button(btn_label, type="primary", use_container_width=True, key=f"go_{pfx}"):
         if not sel_ids:
             st.warning("اختر كاتباً واحداً على الأقل.")
         else:
-            with st.spinner("جارٍ جلب المقالات وترجمة العناوين…"):
+            with st.spinner("جارٍ جلب المقالات والتغريدات وترجمة العناوين…"):
                 items, notes = cached_writers(
                     tuple(sorted(sel_ids)), DAY_OPTS[days_label], json.dumps(S()["writers"], ensure_ascii=False, sort_keys=True)
                 )
@@ -1653,22 +1701,42 @@ with tab_wr:
                 items = [a for a in items if a.get("ctype") == ctype]
             matchers = []
             if use_kw and kw_terms and items:
-                with st.spinner("جارٍ فحص نصوص المقالات…"):
-                    matchers = core.make_matchers(kw_terms, ["en", "iw"])
-                    core.enrich_items(items, matchers, joiner, limit=60)
-                    items = [a for a in items if not (a.get("fetched") and not a.get("found"))]
+                with st.spinner("جارٍ فحص النصوص…"):
+                    matchers = core.make_matchers(kw_terms, codes)
+                    if pfx == "wa":  # التغريدة نصها هو العنوان: نفحص العنوان بلا جلب صفحات
+                        for a in items:
+                            a["found"] = core.find_mentions(a.get("title", ""), matchers, joiner)[0]
+                        items = [a for a in items if a["found"]]
+                    else:
+                        core.enrich_items(items, matchers, joiner, limit=60)
+                        items = [a for a in items if not (a.get("fetched") and not a.get("found"))]
             counts = {}
             for a in items:
                 counts[a["writer"]] = counts.get(a["writer"], 0) + 1
             chosen = [w["name_ar"] for w in all_w if w["id"] in sel_ids]
             hl = sorted({s_ for alts in matchers for stems in alts for s_ in stems}, key=len, reverse=True)
-            st.session_state["res_wr"] = {
-                "items": items, "errors": [] if items else ["لم يُعثر على مقالات — راجع «الاستعلام المُرسل فعلياً» لمعرفة ما جُرّب."],
+            st.session_state[f"res_{pfx}"] = {
+                "items": items, "errors": [] if items else ["لم يُعثر على شيء — راجع «الاستعلام المُرسل فعلياً» لمعرفة ما جُرّب (وهل تويتر رد)."],
                 "used": notes, "summaries": {}, "counts": counts,
                 "silent": [n for n in chosen if n not in counts], "hidden": 0, "hl": hl,
             }
-    st.caption("ℹ️ مواقع مثل نيويورك تايمز وواشنطن بوست وفاينانشال تايمز وهآرتس مدفوعة: يظهر عنوانها مترجماً، وقد يتعذّر عرض نصها الكامل.")
-    render_results("wr")
+    render_results(pfx)
+
+
+with tab_wr:
+    use_filters("wr", "kw")
+    st.caption(
+        "أحدث مقالات الرأي والتحليل لكتّاب ومراسلين مهتمين بالشرق الأوسط، بعناوين مترجمة، وزر «ترجم المقال» لقراءة النص مترجماً. "
+        "النتائج تُحفظ نصف ساعة، فالفتح المتكرر سريع."
+    )
+    sub_f, sub_a = st.tabs(["🌐 الكتّاب الأجانب", "🇸🇦 الكتّاب العرب (تويتر وغيره)"])
+    with sub_f:
+        writers_panel("wr", ["US", "UK", "IL"], "اعرض أحدث مقالات الكتّاب الأجانب", ["en", "iw"])
+        st.caption("ℹ️ مواقع مثل نيويورك تايمز وواشنطن بوست وفاينانشال تايمز وهآرتس مدفوعة: يظهر عنوانها مترجماً، وقد يتعذّر عرض نصها الكامل.")
+    with sub_a:
+        st.caption("هنا الكتّاب العرب اللي ضفتهم (سعوديون وخليجيون ومصريون وغيرهم): آخر تغريداتهم ومقالاتهم باسمهم. "
+                   "الإضافة من تاب «مصادري» ← «إضافة ككاتب». تويتر بيحجب الأدوات الآلية، فممكن التغريدات تتأخر أو متظهرش في بعض الأوقات.")
+        writers_panel("wa", ["SA", "GCC", "EG", "AR"], "🐦 اعرض أحدث ما كتبه الكتّاب العرب", ["ar"])
 
 
 def render_saved():
@@ -1697,7 +1765,7 @@ def render_saved():
     with st.expander("🎙️ نشرة صوتية من المحفوظات (مثالية للمترو)"):
         labels = {f"{n + 1}. {x.get('title_ar', '')[:70]}": x for n, x in enumerate(s["saved"])}
         picked = st.multiselect("اختر المقالات (بالترتيب الذي تُقرأ به)", list(labels), default=list(labels)[:5], key="bl_pick")
-        st.caption("تُقرأ حسب إعدادات «🎧 إعدادات القراءة الصوتية» أعلى الصفحة (الصوت والسرعة وما يُقرأ).")
+        st.caption("تُقرأ حسب إعدادات «🎧 إعدادات القراءة الصوتية» فوق في التاب (الصوت والسرعة وما يُقرأ).")
         if st.button("🎙️ اصنع النشرة", key="bl_go", use_container_width=True):
             if not picked:
                 st.warning("اختر مقالاً واحداً على الأقل.")
@@ -2042,6 +2110,10 @@ with tab_sv:
     render_saved()
 
 with tab_ms:
+    with st.expander("🎧 إعدادات القراءة الصوتية (للمترو والسماعات)"):
+        tts_settings("tts")
+        st.radio("ما الذي يُقرأ عند الضغط على «🎧 استمع»؟", TTS_MODES, key="tts_mode")
+        st.caption("تُجهَّز القراءة بصوت عربي عصبي، ويمكن تنزيلها MP3 قبل نزول المترو للاستماع بلا إنترنت.")
     if IS_ADMIN:
         render_manage()
         st.divider()
@@ -2049,4 +2121,5 @@ with tab_ms:
     else:
         st.info("إدارة المصادر والشفرات غير متاحة في النسخة التجريبية.")
 
+save_results()
 show_footer()
