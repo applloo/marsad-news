@@ -1836,8 +1836,18 @@ def writers_panel(pfx, gcodes, btn_label, codes):
         sel_ids += [label_to_id[p] for p in picked]
     if pfx == "wa" and not sel_ids:
         st.info("لسه ما اضفتش كتّاب عرب. روح تاب «مصادري» ← «إضافة ككاتب» واكتب الاسم وحساب تويتر واختار الجنسية.")
-    use_ctype = st.checkbox("طبّق فلتر «نوع المحتوى» أعلاه", value=False, key=f"{pfx}_ct")
-    use_kw = st.checkbox("اقتصر على ما يذكر كلمات البحث أعلاه (يفحص النص — أبطأ)", value=False, key=f"{pfx}_kw")
+    if pfx == "wa":
+        links_ = [f"[🐦 @{w['twitter']}](https://x.com/{w['twitter']})" for w in all_w if w["id"] in sel_ids and w.get("twitter")]
+        if links_:
+            st.markdown("افتح حساباتهم على X مباشرة: " + " · ".join(links_))
+    qm_w = st.radio("طريقة البحث", ["📰 اعرض آخر ما كتبوه (بدون كلمات بحث)", "🔎 اعرض بس اللي يذكر كلماتي (الخانة فوق)"],
+                    horizontal=True, key=f"{pfx}_qm")
+    use_kw = qm_w.startswith("🔎")
+    if use_kw:
+        st.caption("هيفحص نص كل مقال/تغريدة ويعرض بس اللي فيه كلماتك. اكتب الكلمات في خانة «🔎 كلمات البحث» اللي فوق. وده ابطأ.")
+    else:
+        st.caption("هيعرض كل ما نشروه في الفترة من غير ما تكتب كلمة، مرتب بالأحدث.")
+    use_ctype = st.checkbox("طبّق فلتر «نوع المحتوى» (من الفلاتر فوق)", value=False, key=f"{pfx}_ct")
     if st.button(btn_label, type="primary", use_container_width=True, key=f"go_{pfx}"):
         if not sel_ids:
             st.warning("اختر كاتباً واحداً على الأقل.")
@@ -1851,6 +1861,8 @@ def writers_panel(pfx, gcodes, btn_label, codes):
             if use_ctype and ctype != "الكل":
                 items = [a for a in items if a.get("ctype") == ctype]
             matchers = []
+            if use_kw and not kw_terms:
+                st.warning("اكتب كلمات البحث في الخانة فوق، او غيّر الطريقة لـ «اعرض آخر ما كتبوه».")
             if use_kw and kw_terms and items:
                 with st.spinner("جارٍ فحص النصوص…"):
                     matchers = core.make_matchers(kw_terms, codes)
