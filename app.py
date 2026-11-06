@@ -1339,6 +1339,46 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
     render_results(key)
 
 
+def style_tabs():
+    """يلوّن التابات الرئيسية ويكبّرها بجافاسكربت (لأن الـCSS وحده مش بيمسك في كل نسخ Streamlit)"""
+    import streamlit.components.v1 as components
+    components.html("""
+<script>
+(function(){
+  var COL=["#c0392b","#2563c9","#d9822b","#2a8f55"];
+  function paint(){
+    try{
+      var doc=window.parent.document;
+      var lists=doc.querySelectorAll('[role="tablist"]');
+      if(!lists.length) return;
+      var tabs=lists[0].querySelectorAll('[role="tab"]');
+      tabs.forEach(function(t,i){
+        t.style.setProperty('border-radius','14px','important');
+        t.style.setProperty('padding','10px 14px','important');
+        t.style.setProperty('min-height','48px','important');
+        t.style.setProperty('border','1px solid rgba(128,128,128,.4)','important');
+        t.style.setProperty('margin','3px','important');
+        if(i>=3&&i<=6){
+          t.style.setProperty('background',COL[i-3],'important');
+          t.style.setProperty('color','#fff','important');
+          t.style.setProperty('font-weight','700','important');
+          t.style.setProperty('min-height','54px','important');
+          var sel=t.getAttribute('aria-selected')==='true';
+          t.style.setProperty('box-shadow',sel?'0 0 0 3px rgba(255,255,255,.7),0 4px 14px rgba(0,0,0,.5)':'none','important');
+          t.style.setProperty('opacity',sel?'1':'.85','important');
+        } else {
+          var s2=t.getAttribute('aria-selected')==='true';
+          t.style.setProperty('background',s2?'rgba(255,75,75,.25)':'rgba(128,128,128,.12)','important');
+        }
+      });
+      lists[0].style.setProperty('flex-wrap','wrap','important');
+    }catch(e){}
+  }
+  paint(); setInterval(paint,700);
+})();
+</script>""", height=0)
+
+
 HOME_SECTIONS = {"il": ("اسرائيلي", ISRAEL, "IL", "#c0392b"), "us": ("امريكي", USA, "US", "#2563c9"),
                  "uk": ("بريطاني", UK, "UK", "#d9822b"), "rg": ("تركيا وايران واثيوبيا", REGION, "US", "#2a8f55")}
 HOME_GD = {"il": "IS", "us": "US", "uk": "UK", "rg": None}
@@ -1436,6 +1476,7 @@ def render_home():
 
 with home_box:
     render_home()
+style_tabs()
 
 with tab_il:
     use_filters("il", "full")
