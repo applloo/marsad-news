@@ -354,6 +354,43 @@ def _page_meta(html_text):
     return " | ".join(secs)
 
 
+_BOILER = {"supported by", "advertisement", "skip advertisement", "story continues below advertisement", "listen to this article",
+           "share full article", "continue reading the main story", "sign up for", "the opinions", "read in app", "subscribe", "newsletter"}
+
+
+def _drop_boiler(txt):
+    out = []
+    for ln in (txt or "").split("\n"):
+        k = ln.strip().lower().rstrip(".:")
+        if k in _BOILER:
+            continue
+        out.append(ln)
+    return "\n".join(out)
+
+
+def _authors_from_html(page):
+    """اسماء الكتّاب من وسوم الصفحة وJSON-LD (أفضل جهد)"""
+    names = []
+    try:
+        for k, v in _metas(page):
+            if k in ("author", "article:author", "parsely-author", "dc.creator", "sailthru.author", "byl", "twitter:creator"):
+                v = re.sub(r"^\s*by\s+", "", _html.unescape(v), flags=re.I).strip()
+                if v and not v.startswith(("http", "@")):
+                    names += [x.strip() for x in re.split(r",|\band\b|&| و ", v) if x.strip()]
+        for mm in re.finditer(r'"author"\s*:', page):
+            chunk = page[mm.end(): mm.end() + 500].split('"publisher"')[0]
+            names += [_html.unescape(x).strip() for x in re.findall(r'"name"\s*:\s*"([^"]{3,60})"', chunk)]
+    except Exception:
+        pass
+    seen, out = set(), []
+    for n in names:
+        k = n.lower()
+        if k not in seen and 2 < len(n) < 60 and not re.search(r"https?:|\.com|staff|editor|newsroom", k):
+            seen.add(k)
+            out.append(n)
+    return out[:5]
+
+
 def _extract(content, enc=None):
     text = content.decode(enc or "utf-8", errors="replace") if isinstance(content, bytes) else content
     out = None
@@ -388,6 +425,8 @@ def _extract(content, enc=None):
             out["text"] = t3
             out["title"] = out["title"] or ex.title
             out["date"] = out["date"] or ex.date
+    out["text"] = _drop_boiler(out["text"])
+    out["authors"] = _authors_from_html(text[:400000])
     out["section"] = _page_meta(text[:200000])
     words = max(1, len(out["text"].split()))
     out["fp"] = 1000.0 * len(_FIRST_PERSON.findall(out["text"])) / words if words > 200 else 0.0
@@ -461,7 +500,7 @@ def _via_gtranslate(url):
     r = requests.get(u, headers=BROWSER_HEADERS, timeout=30)
     r.raise_for_status()
     d = _extract(r.content, r.encoding or r.apparent_encoding)
-    d["pre_ar"] = True
+    d["pre_ar"] = translated_ok("x", d.get("text", "")) and bool(_HAS_AR.search(d.get("text", "")[:600]))  # لا نفترض العربية: الترجمة قد تتم في المتصفح فقط
     return d, "ترجمة جوجل للصفحة (جوجل هو اللي فتح الموقع)"
 
 

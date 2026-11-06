@@ -417,6 +417,10 @@ def reader_page():
         st.success(f"🟢 طريقة جلب المقال: {via}")
     else:
         st.info(f"🟡 طريقة جلب المقال: {via} — لأن الموقع رفض فتحه مباشرة. (النص قد يختلف شكله قليلاً عن الأصل.)")
+    if art.get("authors") and not wr:
+        st.markdown("✍️ **الكاتب (من توقيع المقال):** " + html.escape("، ".join(art["authors"])))
+    elif not wr and not art.get("authors"):
+        st.caption("✍️ اسم الكاتب مش ظاهر في بيانات الصفحة اللي وصلت للتطبيق. شوفه في الصفحة الاصلية.")
     if art["date"]:
         st.markdown(f"🕒 **تاريخ النشر (حسب بيانات المصدر):** {art['date']}")
     if seen:
