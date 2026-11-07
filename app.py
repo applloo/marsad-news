@@ -358,6 +358,47 @@ def search_suggestions(title):
     st.caption("كل رابط بيفتح تاب جديد ببحث بعنوان المقال، علشان تلاقي نفس الخبر عند ناس تانية.")
 
 
+def reader_scroll_tool():
+    """ازرار عائمة للتحكم الدقيق في التمرير اثناء قراءة المقال (الشريط الجانبي وعجلة الماوس بيقفزوا جمل كاملة)"""
+    import streamlit.components.v1 as components
+    components.html("""
+<script>
+(function(){
+  try{
+    var P=window.parent, D=P.document;
+    var old=D.getElementById('rd-scroll-tool'); if(old) old.remove();
+    var box=D.createElement('div'); box.id='rd-scroll-tool';
+    box.style.cssText='position:fixed;left:10px;bottom:90px;z-index:99999;display:flex;flex-direction:column;gap:6px;direction:ltr;font-family:sans-serif';
+    function btn(t,title){var b=D.createElement('button');b.textContent=t;b.title=title;
+      b.style.cssText='width:56px;height:56px;border-radius:14px;border:2px solid rgba(255,255,255,.6);background:rgba(30,30,40,.92);color:#fff;font-size:26px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none';
+      return b;}
+    function area(){return D.querySelector('[data-testid="stMain"]')||D.querySelector('section.main')||D.scrollingElement||D.documentElement;}
+    var speed=14, timer=null, auto=false, autoTimer=null, autoSpeed=1;
+    function step(dy){var el=area(); el.scrollBy({top:dy,behavior:'auto'});}
+    function holdStart(dir){step(dir*speed); stopHold(); timer=setInterval(function(){step(dir*speed);},40);}
+    function stopHold(){if(timer){clearInterval(timer);timer=null;}}
+    function bindHold(b,dir){
+      ['mousedown','touchstart'].forEach(function(e){b.addEventListener(e,function(ev){ev.preventDefault();holdStart(dir);},{passive:false});});
+      ['mouseup','mouseleave','touchend','touchcancel'].forEach(function(e){b.addEventListener(e,stopHold);});
+    }
+    var up=btn('▲','لفوق (اضغط واستمر)'), down=btn('▼','لتحت (اضغط واستمر)');
+    var play=btn('▶','تمرير تلقائي بطيء'), plus=btn('+','أسرع'), minus=btn('−','أبطأ');
+    bindHold(up,-1); bindHold(down,1);
+    function setAuto(on){
+      auto=on; play.textContent=on?'⏸':'▶';
+      if(autoTimer){clearInterval(autoTimer);autoTimer=null;}
+      if(on){autoTimer=setInterval(function(){step(autoSpeed);},40);}
+    }
+    play.onclick=function(){setAuto(!auto);};
+    plus.onclick=function(){autoSpeed=Math.min(8,autoSpeed+0.5);speed=Math.min(40,speed+4);};
+    minus.onclick=function(){autoSpeed=Math.max(0.5,autoSpeed-0.5);speed=Math.max(4,speed-4);};
+    [up,play,plus,minus,down].forEach(function(b){box.appendChild(b);});
+    D.body.appendChild(box);
+  }catch(e){}
+})();
+</script>""", height=0)
+
+
 def reader_page():
     url = unquote(st.query_params.get("view", ""))
     seen = st.query_params.get("seen", "")
@@ -366,6 +407,7 @@ def reader_page():
     outlet = unquote(st.query_params.get("o", ""))
 
     st.markdown("## 📖 قراءة المقال مترجماً")
+    reader_scroll_tool()
     if not url.startswith(("http://", "https://")):
         st.error("رابط غير صالح.")
         return
