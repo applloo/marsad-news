@@ -1578,6 +1578,7 @@ def render_home():
 with home_box:
     render_home()
 style_tabs()
+reader_scroll_tool()
 
 with tab_il:
     use_filters("il", "full")
