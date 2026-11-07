@@ -975,7 +975,8 @@ def use_filters(p, level="full"):
                 g["end_utc"] = datetime(e.year, e.month, e.day, 23, 59, 59, tzinfo=core.TZ).astimezone(timezone.utc)
             g["max_rec"] = st.slider("عدد النتائج الأقصى", 10, 100, 30, step=10, key=f"{p}_max")
             g["verify"] = st.checkbox("🔍 افحص نص كل مقال واعرض جملة ذُكرت فيها كلمتك (أبطأ)", value=True, key=f"{p}_ver")
-            g["hide_nomatch"] = st.checkbox("🚫 أخفِ المقالات التي لا تظهر كلمتك في نصها", value=False, key=f"{p}_hide")
+            g["hide_nomatch"] = st.checkbox("🚫 أخفِ المقالات التي لا تظهر كلمتك في نصها (موصى به)", value=True, key=f"{p}_hide",
+                                            help="أخبار جوجل وGDELT أحياناً يرجّعوا مقالات الكلمة فيها بعيدة عن العنوان او مش موجودة. الفحص بيقرا نص المقال ويشيل اللي مفيهوش كلمتك.")
     if level == "full":
         st.caption("النتايج اللي تطلع بتفضل محفوظة، ومبتتمسحش غير لما تبحث من جديد.")
 
@@ -1051,7 +1052,7 @@ def do_search(key, jobs, sel=None, terms=None, pre=False, seed=None):
             live_ph.markdown(live_html(data["items"], hl), unsafe_allow_html=True)
     if verify and data["items"]:
         items = data["items"]
-        total = min(len(items), 40)
+        total = min(len(items), 80)
         for i in range(0, total, 8):
             status_ph.info(f"🔍 جارٍ فحص نصوص المقالات… ({i}/{total})")
             core.enrich_items(items[i:i + 8], matchers, joiner, limit=8)

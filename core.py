@@ -908,9 +908,16 @@ def search_iter(terms, joiner, match, jobs, start_utc, end_utc, max_rec, ctype):
             arts = yield from call(f"{q} {job['extra']}".strip())
             yield take(arts)
             continue
-        arts = yield from call(f"{q} {job['extra']}")
-        got = list(arts)
-        yield take(arts)
+        got = []
+        if len(doms) > 6:  # قائمة دومينات طويلة ترفضها GDELT («query too long»): نبدأ بدفعات من 5 مباشرة
+            for i in range(0, min(len(doms), 40), 5):
+                arts = yield from call(f"{q} {domain_expr(doms[i:i + 5])}", "↳ دفعة: ")
+                got += arts
+                yield take(arts)
+        else:
+            arts = yield from call(f"{q} {job['extra']}")
+            got = list(arts)
+            yield take(arts)
         if not got:  # خطة بديلة 1: دفعات أصغر من المواقع
             for i in range(0, min(len(doms), 32), 4):
                 arts = yield from call(f"{q} {domain_expr(doms[i:i + 4])}", "↳ دفعة: ")
