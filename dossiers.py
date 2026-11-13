@@ -37,6 +37,7 @@ ENTITIES = {
     "روسيا": ["روسيا", "روسي", "موسكو", "russia", "russian", "moscow"],
     "أوكرانيا": ["أوكرانيا", "أوكراني", "ukraine", "ukrainian", "kyiv"],
     "الدعم السريع": ["الدعم السريع", "rsf", "rapid support forces"],
+    "قطر": ["قطر", "قطري", "الدوحة", "qatar", "qatari", "doha"],
     "أمريكا": ["أمريكا", "أمريكي", "الولايات المتحدة", "واشنطن", "ترامب", "ترمب",
                "united states", "washington", "trump", "pentagon", "white house"],
 }
@@ -384,6 +385,22 @@ def prompt_for(scope, g, max_items=40):
                     + "\n".join(item_lines(g["us_items"][-15:])) + "\n\n")
     return PROMPT.format(scope=scope, name=g["name"], first=g["first"], last=g["last"], note=note,
                          timeline="\n".join(item_lines(shown)), us_block=us_block)
+
+
+SCRIPT_TAIL = """
+
+بعد التحليل، اكتب اسكريبت فيديو مدته حوالي {minutes} دقيقة بالعامية المصرية، كأنك بتحكي لصاحبك على القهوة:
+- الهوك (أول 5 ثواني): سؤال أو مفاجأة أو تناقض حقيقي من الأخبار اللي فوق بس (زي تصريح عكس اللي حصل بعده).
+- المقدمة: الناس دي هتعرف إيه لو كملت.
+- القصة كحدوتة بالترتيب، ومين عايز إيه.
+- هوك صغير كل 30 لـ 45 ثانية ("بس استنى، اللي حصل بعدها أغرب").
+- الختام: الخلاصة والسيناريوهات الجاية، وسؤال للناس يعلّقوا عليه.
+اكتب جنب كل جزء وقته بالثواني. وممنوع تألف أي معلومة عشان الهوك يبقى أقوى: كل هوك لازم يتبني على خبر موجود فوق، والادعاءات والمنشورات تتقال إنها ادعاءات مش حقايق.
+"""
+
+
+def script_prompt(scope, g, minutes=5):
+    return prompt_for(scope, g).rstrip() + SCRIPT_TAIL.format(minutes=minutes)
 
 
 def briefing_md(res, limit=300):

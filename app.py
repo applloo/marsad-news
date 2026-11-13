@@ -3,6 +3,7 @@
 رادار الأخبار العالمية — بحث بالعربية في مصادر إسرائيلية وأمريكية وبريطانية + بحث عام عبر GDELT
 """
 import hashlib
+from collections import Counter
 import html
 import json
 import os
@@ -2369,6 +2370,29 @@ def render_watch():
 
 # ───────── 🧵 الملفات والخيوط: ربط كل الأخبار في ملفات وخيوط + منشورات فيس وتويتر + برومبت تحليل جاهز ─────────
 DOS_RES_FILE, DOS_CFG_FILE = "marsad_dossiers.json", "marsad_dossiers_cfg.json"
+TAB_LABELS = {"il": "الإسرائيلية", "us": "الأمريكية", "uk": "البريطانية", "rg": "تركيا وإيران وإثيوبيا", "ml": "ترجمة ثم بحث",
+              "wr": "الكتّاب", "gd": "GDELT", "br": "تصفّح مصدر", "in": "مكتب الاستخبارات",
+              "in_all": "مكتب الاستخبارات", "home": "البحث السريع"}
+DOS_HELP = """
+**الفكرة:** التبويب ده مش بيدور على أخبار جديدة بنفسه. هو بيرتب الأخبار اللي التطبيق جابها قبل كده، زي واحد بيرتب الجرايد اللي على الترابيزة في ملفات.
+
+**1️⃣ جهّز الأخبار (مش لازم كلها):**
+- **أسهل حاجة:** ما تعملش حاجة. التقرير اليومي بيتعمل لوحده كل صبح، والتبويب بياخد آخر 7 أيام منه.
+- **بحثك في المصادر:** ابحث في أي تاب (أمريكية، بريطانية، إسرائيلية، تركيا وإيران...). كل نتيجة بتتحفظ لوحدها في **أرشيف البحث** (العداد اللي تحت)، حتى لو عملت بحث تاني أو قفلت التطبيق.
+- **موضوع معين بعمق:** تاب «التقرير اليومي» ← «🎯 تقرير مخصص» ← اكتب المواضيع (زي `إيران + أمريكا`) ← «شغّل». بياخد من ربع ساعة لساعة على GitHub.
+- **خبر عجبك:** احفظه في المحفوظات، وهو كمان بيدخل.
+- **تحركات أمريكا وتصريحات ترامب:** ملف جاهز بالروابط بيدخل لوحده (فيه الحرب الأمريكية الإيرانية وأوكرانيا والسودان والقرن الأفريقي).
+
+**2️⃣ لو فيه ترند على فيس أو تويتر:** افتح «💬 منشورات فيس وتويتر»، الصق المنشور، ودوس «➕ أضف». المنشورات بتتعامل كادعاءات مش حقايق.
+
+**3️⃣ دوس الزرار الأحمر «🔗 اربط واعرض الملفات والخيوط»** وسيب الأرقام زي ما هي.
+
+**4️⃣ اختار ملف** من «📁 الملفات» (زي «الحرب الأمريكية الإيرانية»). جوه كل ملف: العناصر، والزاوية الأمريكية، و«🤖 برومبت التحليل».
+
+**5️⃣ في «🤖 برومبت التحليل»:** اختار «🎬 تحليل + اسكريبت فيديو بهوكات» وحدد المدة، ودوس علامة النسخ، والصقه في شات Claude. هيرجعلك: التحليل (الأحداث، التصريحات ونتيجتها، الدوافع، التبعات، موقف أمريكا، الحبكة) وبعده اسكريبت بهوك في أول 5 ثواني وهوكات في النص.
+
+**نصيحة:** ابعت ملف واحد في المرة عشان التحليل يطلع مركز. ولو عايز كل حاجة، نزّل «⬇️ التقرير كامل» من تحت خالص.
+"""
 POST_PLATFORMS = ["فيسبوك", "تويتر / X", "تيك توك", "يوتيوب", "تليجرام", "تاني"]
 
 
@@ -2407,6 +2431,42 @@ def _dos_result():
     return ss["dos_res"]
 
 
+DOS_POOL_FILE = "marsad_dos_pool.json"
+POOL_KEYS = ["url", "title", "title_ar", "title_en", "seendate", "domain", "country_ar", "snip_ar", "outlet"]
+
+
+def _dos_pool():
+    """أرشيف البحث: كل نتيجة بحث بتعملها في أي تاب بتتحفظ هنا تلقائياً (آخر 21 يوم)، عشان تدخل في الربط حتى لو بحثت تاني أو قفلت"""
+    ss = st.session_state
+    if "dos_pool" not in ss:
+        ss["dos_pool"] = {}
+        if PERSIST:
+            try:
+                ss["dos_pool"] = store.load_file(GH_TOKEN, GH_GIST, DOS_POOL_FILE, {}) or {}
+            except Exception:
+                pass
+    pool, added = ss["dos_pool"], 0
+    now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    for k, v in list(ss.items()):
+        if not (k.startswith("res_") and isinstance(v, dict)) or v.get("partial"):
+            continue
+        for a in v.get("items") or []:
+            if isinstance(a, dict) and a.get("url") and a["url"] not in pool:
+                pool[a["url"]] = {**{f: a[f] for f in POOL_KEYS if a.get(f)}, "pooled": now, "tab": k[4:]}
+                added += 1
+    if added:
+        cut = (datetime.now(timezone.utc) - timedelta(days=21)).strftime("%Y%m%d")
+        keep = sorted(pool.values(), key=lambda a: a.get("pooled", ""), reverse=True)
+        keep = [a for a in keep if (a.get("seendate") or a.get("pooled", ""))[:8] >= cut][:3000]
+        ss["dos_pool"] = pool = {a["url"]: a for a in keep}
+        if PERSIST:
+            try:
+                store.save_file(GH_TOKEN, GH_GIST, DOS_POOL_FILE, pool)
+            except Exception:
+                pass
+    return pool
+
+
 def _dos_collect(use, uploads):
     """يجمع الأخبار من كل الأماكن اللي اخترتها في التطبيق"""
     lab = lambda d: about_plain(re.sub(r"<[^>]+>", "", html.unescape(src_label(d, with_domain=False))).split("·")[0])
@@ -2421,9 +2481,7 @@ def _dos_collect(use, uploads):
         counts[origin] = counts.get(origin, 0) + n
 
     if "بحث" in use:
-        for k, v in list(st.session_state.items()):
-            if k.startswith("res_") and isinstance(v, dict):
-                add(v.get("items"), "نتايج البحث")
+        add(list(_dos_pool().values()), "نتايج البحث")
     if "يومي" in use and _GT and _GG:
         try:
             if "reports" not in st.session_state:
@@ -2487,9 +2545,15 @@ def _dos_group(g, scope, key):
             st.caption("تصريحات وتحركات ترامب وأمريكا اللي تخص الموضوع ده")
             st.markdown("\n".join(_dos_item_md(it) for it in us[-15:]))
     with tabs[-1]:
-        st.caption("فيه المبادئ كلها: الدوافع، التبعات، الأحداث، الترابط، التصريحات ونتيجتها، قصد كل جريدة، وجهة نظر تانية، والحبكة. "
-                   "دوس علامة النسخ اللي فوق على الشمال في المربع.")
-        st.code(dossiers_mod.prompt_for(scope, g), language=None)
+        st.caption("فيه المبادئ كلها: الدوافع، التبعات، الأحداث، الترابط، التصريحات ونتيجتها، قصد كل جريدة، وجهة نظر تانية، والحبكة.")
+        kind = st.radio("عايز إيه؟", ["🎬 تحليل + اسكريبت فيديو بهوكات", "🧠 تحليل بس"], horizontal=True, key=f"dos_pk_{key}")
+        if kind.startswith("🎬"):
+            mins = st.select_slider("مدة الفيديو (دقايق)", options=[1, 3, 5, 8, 10, 15], value=5, key=f"dos_pm_{key}")
+            txt = dossiers_mod.script_prompt(scope, g, mins)
+        else:
+            txt = dossiers_mod.prompt_for(scope, g)
+        st.info("📋 دوس علامة النسخ اللي فوق على الشمال في المربع الرمادي، وبعدين الصقه في شات Claude.")
+        st.code(txt, language=None)
 
 
 def render_posts():
@@ -2574,6 +2638,21 @@ def render_dossiers():
                "عدّ وربط بس من غير ذكاء اصطناعي، فمش بيصرف رصيد. والتحليل بيتعمل بالبرومبت الجاهز لأهم الملفات.")
     if ss.get("dos_msg"):
         st.success(ss.pop("dos_msg"))
+    with st.expander("📖 ازاي تستخدم التبويب ده؟ (خطوة بخطوة)", expanded=_dos_result() is None):
+        st.markdown(DOS_HELP)
+    pool = _dos_pool()
+    tabs_n = Counter(a.get("tab", "") for a in pool.values())
+    st.markdown(f"🔎 **أرشيف البحث:** {len(pool)} خبر من بحثك في التابات (آخر 21 يوم)"
+                + (f" — منهم {', '.join(f'{TAB_LABELS.get(k, k)} ({n})' for k, n in tabs_n.most_common(6))}" if pool else
+                   " — لسه مفيش. أي بحث تعمله في أي تاب هيتسجل هنا لوحده."))
+    if pool and st.button("🗑️ امسح أرشيف البحث", key="dos_pool_clear"):
+        ss["dos_pool"] = {}
+        if PERSIST:
+            try:
+                store.save_file(GH_TOKEN, GH_GIST, DOS_POOL_FILE, {})
+            except Exception:
+                pass
+        st.rerun()
     with st.expander("💬 منشورات فيس وتويتر (الخلاط التحليلي)", expanded=False):
         render_posts()
     render_dossiers_cfg()
