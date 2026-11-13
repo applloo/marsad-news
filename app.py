@@ -13,6 +13,7 @@ from urllib.parse import quote, unquote, urlparse
 import streamlit as st
 
 import core
+import dossiers as dossiers_mod
 import intel
 from core import fmt_seen, tr
 import gh_actions
@@ -977,7 +978,7 @@ query, match, joiner, ctype = "", core.MATCH_MODES[0], "AND", "الكل"
 start_utc, end_utc, max_rec, verify, hide_nomatch = _now0 - timedelta(days=7), _now0, 30, True, False
 
 home_box = st.container()
-tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_sv, tab_ms = st.tabs(TAB_NAMES)
+tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_dos, tab_sv, tab_ms = st.tabs(TAB_NAMES)
 
 
 def use_filters(p, level="full"):
@@ -2366,10 +2367,299 @@ def render_watch():
             st.code(md, language=None)
 
 
+# ───────── 🧵 الملفات والخيوط: ربط كل الأخبار في ملفات وخيوط + منشورات فيس وتويتر + برومبت تحليل جاهز ─────────
+DOS_RES_FILE, DOS_CFG_FILE = "marsad_dossiers.json", "marsad_dossiers_cfg.json"
+POST_PLATFORMS = ["فيسبوك", "تويتر / X", "تيك توك", "يوتيوب", "تليجرام", "تاني"]
+
+
+def _dos_cfg_text():
+    ss = st.session_state
+    if "dos_cfg" not in ss:
+        txt = None
+        if PERSIST:
+            try:
+                txt = (store.load_file(GH_TOKEN, GH_GIST, DOS_CFG_FILE, {}) or {}).get("text")
+            except Exception:
+                txt = None
+        ss["dos_cfg"] = txt or dossiers_mod.default_config_text()
+    return ss["dos_cfg"]
+
+
+def _dos_save_cfg(text):
+    st.session_state["dos_cfg"] = text
+    st.session_state.pop("dos_cfg_edit", None)  # عشان مربع التعديل يعرض النسخة الجديدة
+    if PERSIST:
+        try:
+            store.save_file(GH_TOKEN, GH_GIST, DOS_CFG_FILE, {"text": text})
+        except Exception as e:
+            st.session_state["dos_msg"] = f"⚠️ اتغيرت الملفات بس ما اتحفظتش في التخزين الدائم ({type(e).__name__})"
+
+
+def _dos_result():
+    ss = st.session_state
+    if "dos_res" not in ss:
+        ss["dos_res"] = None
+        if PERSIST:
+            try:
+                ss["dos_res"] = store.load_file(GH_TOKEN, GH_GIST, DOS_RES_FILE, None)
+            except Exception:
+                pass
+    return ss["dos_res"]
+
+
+def _dos_collect(use, uploads):
+    """يجمع الأخبار من كل الأماكن اللي اخترتها في التطبيق"""
+    lab = lambda d: about_plain(re.sub(r"<[^>]+>", "", html.unescape(src_label(d, with_domain=False))).split("·")[0])
+    out, counts = [], {}
+
+    def add(items, origin):
+        n = 0
+        for a in items or []:
+            if isinstance(a, dict) and a.get("url") and (a.get("title") or a.get("title_ar")):
+                out.append(dossiers_mod.from_app_item(a, lab, source_country, origin))
+                n += 1
+        counts[origin] = counts.get(origin, 0) + n
+
+    if "بحث" in use:
+        for k, v in list(st.session_state.items()):
+            if k.startswith("res_") and isinstance(v, dict):
+                add(v.get("items"), "نتايج البحث")
+    if "يومي" in use and _GT and _GG:
+        try:
+            if "reports" not in st.session_state:
+                st.session_state["reports"] = store.load_reports(_GT, _GG)
+                st.session_state["reports_t"] = time.time()
+            for rep in (st.session_state["reports"].get("archive") or {}).values():
+                for f in (rep.get("files") or {}).values():
+                    add(f.get("items"), "التقرير اليومي")
+        except Exception as e:
+            st.warning(f"تعذّر تحميل التقارير اليومية ({type(e).__name__})")
+    if "مخصص" in use and GH_TOKEN and GH_GIST:
+        data, _cfg = _watch_load()
+        for t in (data or {}).get("topics") or []:
+            add(t.get("items"), "التقرير المخصص")
+    if "محفوظات" in use:
+        add(S()["saved"], "المحفوظات")
+    if "أمريكا" in use:
+        us = dossiers_mod.us_moves_items()
+        out += us
+        counts["تحركات أمريكا"] = len(us)
+    for up in uploads or []:
+        try:
+            got = dossiers_mod.items_from_csv(up.getvalue(), f"ملف: {up.name}")
+            out += got
+            counts[f"ملف: {up.name}"] = len(got)
+        except Exception as e:
+            st.warning(f"الملف {up.name} مش مقروء: {e}")
+    posts = [dossiers_mod.from_post(p) for p in S().get("posts", [])]
+    out += posts
+    counts["منشورات فيس وتويتر"] = len(posts)
+    return out, counts
+
+
+def _dos_item_md(it):
+    ttl = (it.get("title") or "").replace("[", "(").replace("]", ")")
+    icon = "💬" if it.get("kind") == "منشور" else "📰"
+    head = f"[{ttl}]({it['url']})" if it.get("url") else ttl
+    line = f"- {icon} **{head}**  \n  {it.get('date', '')} · {it.get('source', '')} · {it.get('country') or 'بلد غير محدد'}"
+    if it.get("statement"):
+        line += " · 🎤 فيه تصريح"
+    if it.get("summary"):
+        line += f"  \n  > {it['summary'][:300]}"
+    return line
+
+
+def _dos_group(g, scope, key):
+    us = g.get("us_items") or []
+    st.markdown(f"**{len(g['items'])} عنصر** (أخبار {g['news_count']} · منشورات {g['post_count']}) من **{len(g['sources'])} مصدر** · "
+                f"من {g['first']} لحد {g['last']} · تصريحات: {g['statements']}"
+                + (f" · 📈 أيام ارتفاع: {'، '.join(g['spikes'])}" if g.get("spikes") else ""))
+    if g.get("long"):
+        st.caption("⚠️ الخيط ده طويل (أكتر من 14 يوم)، ممكن يكون فيه أكتر من قصة. جرّب «أقل عدد أطراف مشتركة» = 3")
+    names = [f"📋 العناصر ({len(g['items'])})"] + ([f"🇺🇸 الزاوية الأمريكية ({len(us)})"] if us else []) + ["🤖 برومبت التحليل"]
+    tabs = st.tabs(names)
+    with tabs[0]:
+        if len(g["items"]) > 60:
+            st.caption(f"آخر 60 من {len(g['items'])} (الباقي في التقرير اللي بيتنزل تحت)")
+        st.markdown("\n".join(_dos_item_md(it) for it in g["items"][-60:]))
+    if us:
+        with tabs[1]:
+            st.caption("تصريحات وتحركات ترامب وأمريكا اللي تخص الموضوع ده")
+            st.markdown("\n".join(_dos_item_md(it) for it in us[-15:]))
+    with tabs[-1]:
+        st.caption("فيه المبادئ كلها: الدوافع، التبعات، الأحداث، الترابط، التصريحات ونتيجتها، قصد كل جريدة، وجهة نظر تانية، والحبكة. "
+                   "دوس علامة النسخ اللي فوق على الشمال في المربع.")
+        st.code(dossiers_mod.prompt_for(scope, g), language=None)
+
+
+def render_posts():
+    s = S()
+    s.setdefault("posts", [])
+    st.caption("الصق هنا اي منشور من فيس او تويتر عن ترند او قضية، وهيتخلط مع الاخبار في نفس الملفات والخيوط. "
+               "المنشورات بتتعامل كادعاءات محتاجة تحقق، مش كأخبار مؤكدة.")
+    with st.form("dos_post_form", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        pdate = c1.date_input("تاريخ المنشور", value=datetime.now(core.TZ).date())
+        plat = c2.selectbox("المنصة", POST_PLATFORMS)
+        author = c3.text_input("اسم الحساب")
+        text = st.text_area("نص المنشور", height=150)
+        c4, c5 = st.columns(2)
+        url = c4.text_input("رابط المنشور (اختياري)")
+        country = c5.text_input("بلد صاحب الحساب (اختياري)")
+        if st.form_submit_button("➕ أضف المنشور", use_container_width=True):
+            if text.strip():
+                s["posts"].insert(0, {"date": pdate.isoformat(), "platform": plat, "author": author.strip(),
+                                      "text": text.strip(), "url": url.strip(), "country": country.strip()})
+                persist()
+                st.session_state["dos_msg"] = "✅ المنشور اتضاف. دوس «اربط» تاني عشان يدخل في التحليل."
+            else:
+                st.warning("اكتب نص المنشور الأول.")
+    if s["posts"] and st.toggle(f"💬 اعرض المنشورات المحفوظة ({len(s['posts'])})", key="dos_show_posts"):
+        if True:
+            for i, p in enumerate(list(s["posts"])):
+                c1, c2 = st.columns([6, 1])
+                c1.markdown(f"**{p.get('platform', '')} · {p.get('author') or 'حساب'}** · {p.get('date', '')}  \n{p.get('text', '')[:400]}")
+                if c2.button("🗑️ امسح", key=f"dos_pdel_{i}"):
+                    s["posts"].pop(i)
+                    persist()
+                    st.rerun()
+
+
+def render_dossiers_cfg():
+    with st.expander("⚙️ الملفات اللي بيدور عليها (تقدر تضيف وتعدل)"):
+        txt = _dos_cfg_text()
+        dos, err = dossiers_mod.parse_config(txt)
+        if dos:
+            st.markdown("**الملفات الحالية:** " + "، ".join(("🇺🇸 " if d["lens"] else "📈 " if d["type"] == "ترند" else "📁 ") + d["name"] for d in dos))
+        st.markdown("**➕ ملف أو ترند جديد بسرعة**")
+        c1, c2 = st.columns(2)
+        nm = c1.text_input("اسم الملف (مثال: ترند الطماطم في تونس)", key="dos_new_name")
+        kind = c2.radio("النوع", ["ملف", "ترند"], horizontal=True, key="dos_new_kind")
+        g1 = st.text_input("كلمات المجموعة الأولى مفصولة بفاصلة (مثال: طماطم، tomato)", key="dos_new_g1")
+        g2 = st.text_input("كلمات مجموعة تانية لازم تتذكر معاها (اختياري، مثال: تونس، tunisia)", key="dos_new_g2")
+        if st.button("➕ ضيف الملف", key="dos_new_btn"):
+            groups = [[w.strip() for w in re.split(r"[,،]", g) if w.strip()] for g in (g1, g2)]
+            groups = [g for g in groups if g]
+            if nm.strip() and groups:
+                raw = json.loads(txt)
+                raw.append({"name": nm.strip(), "type": kind, "all_of": groups})
+                _dos_save_cfg(json.dumps(raw, ensure_ascii=False, indent=1))
+                st.session_state["dos_msg"] = f"✅ اتضاف ملف «{nm.strip()}». دوس «اربط» عشان يظهر."
+                st.rerun()
+            else:
+                st.warning("اكتب اسم الملف وكلمة واحدة على الأقل.")
+        if IS_ADMIN:
+            st.markdown("**تعديل متقدم (JSON)**: كل ملف ليه اسم، ونوع، و all_of = مجموعات كلمات، والخبر لازم يلمس كلمة من كل مجموعة.")
+            new = st.text_area("تعريف الملفات", value=txt, height=300, key="dos_cfg_edit")
+            c1, c2 = st.columns(2)
+            if c1.button("💾 احفظ التعديل", key="dos_cfg_save"):
+                ok, e2 = dossiers_mod.parse_config(new)
+                if ok:
+                    _dos_save_cfg(new)
+                    st.session_state["dos_msg"] = "✅ اتحفظت الملفات."
+                    st.rerun()
+                else:
+                    st.error(f"فيه غلطة في الكتابة: {e2}")
+            if c2.button("↩️ رجّع الملفات الأصلية", key="dos_cfg_reset"):
+                _dos_save_cfg(dossiers_mod.default_config_text())
+                st.session_state.pop("dos_cfg_edit", None)
+                st.rerun()
+        if err:
+            st.error(f"تعريف الملفات فيه مشكلة: {err}")
+
+
+def render_dossiers():
+    ss = st.session_state
+    st.caption("بيجمع الأخبار اللي عندك في ملفات (مواضيع ثابتة) وخيوط (قصص بتتكون لوحدها من الأخبار اللي فيها نفس الأطراف في أيام قريبة). "
+               "عدّ وربط بس من غير ذكاء اصطناعي، فمش بيصرف رصيد. والتحليل بيتعمل بالبرومبت الجاهز لأهم الملفات.")
+    if ss.get("dos_msg"):
+        st.success(ss.pop("dos_msg"))
+    with st.expander("💬 منشورات فيس وتويتر (الخلاط التحليلي)", expanded=False):
+        render_posts()
+    render_dossiers_cfg()
+
+    st.markdown("### 🔗 اربط الأخبار")
+    opts = {"بحث": "نتايج البحث اللي في التابات", "يومي": "التقرير اليومي (آخر 7 أيام)", "مخصص": "التقرير المخصص",
+            "محفوظات": "المحفوظات", "أمريكا": "تحركات أمريكا وتصريحات ترامب (ملف جاهز بالروابط)"}
+    use = st.multiselect("هات الأخبار منين؟", list(opts), default=list(opts), format_func=lambda k: opts[k], key="dos_use")
+    ups = st.file_uploader("ملفات أخبار إضافية CSV (اختياري) — الأعمدة: date, source, country, title, url, summary",
+                           type=["csv"], accept_multiple_files=True, key="dos_up")
+    c1, c2 = st.columns(2)
+    window = c1.slider("أقصى فرق بالأيام بين خبرين في نفس الخيط", 1, 7, 3, key="dos_win")
+    mins = c2.slider("أقل عدد أطراف مشتركة (زي مصر + إثيوبيا = 2)", 1, 3, 2, key="dos_min")
+    if st.button("🔗 اربط واعرض الملفات والخيوط", type="primary", use_container_width=True, key="dos_run"):
+        dos, err = dossiers_mod.parse_config(_dos_cfg_text())
+        if err:
+            st.error(f"تعريف الملفات فيه مشكلة: {err}")
+        else:
+            with st.spinner("⏳ بيجمع ويربط…"):
+                items, counts = _dos_collect(use, ups)
+                if not items:
+                    st.warning("مفيش أخبار. اعمل بحث في أي تاب، أو استنى التقرير اليومي، أو ضيف منشورات.")
+                else:
+                    res = dossiers_mod.run(items, dos, window, mins)
+                    res["counts"] = counts
+                    ss["dos_res"] = res
+                    if PERSIST:
+                        try:
+                            store.save_file(GH_TOKEN, GH_GIST, DOS_RES_FILE, res)
+                        except Exception as e:
+                            st.caption(f"النتيجة ما اتحفظتش في التخزين الدائم ({type(e).__name__})")
+
+    res = _dos_result()
+    if not res:
+        st.info("دوس «اربط» عشان يطلعلك الملفات والخيوط. النتيجة بتفضل محفوظة لحد ما تربط تاني.")
+        return
+    st.divider()
+    st.caption(f"آخر ربط: {res.get('created', '').replace('T', ' ')} · الأخبار جت من: "
+               + "، ".join(f"{k} ({v})" for k, v in (res.get("counts") or {}).items() if v))
+    m = st.columns(4)
+    for col, (lbl, val) in zip(m, [("عنصر", res["total"]), ("ملف فيه أخبار", len(res["dossiers"])),
+                                   ("خيط", res["n_threads"]), ("منشور", res["posts"])]):
+        col.markdown(f"<div class='hm-stat'><b>{val}</b>{lbl}</div>", unsafe_allow_html=True)
+    view = st.radio("اعرض", ["📁 الملفات", "🧵 خيوط القصص", "💡 اقتراحات ملفات جديدة"], horizontal=True, key="dos_view")
+    if view.startswith("📁"):
+        names = [g["name"] for g in res["dossiers"]]
+        pick = st.selectbox("اختار ملف", ["الكل"] + names, key="dos_pick")
+        for g in res["dossiers"]:
+            if pick != "الكل" and g["name"] != pick:
+                continue
+            ico = "🇺🇸" if g.get("lens") else "📈" if g["type"] == "ترند" else "📁"
+            us_n = len(g.get("us_items") or [])
+            with st.expander(f"{ico} {g['name']} — {len(g['items'])} عنصر" + (f" · 🇺🇸 {us_n}" if us_n else ""), expanded=pick != "الكل"):
+                _dos_group(g, "الملف", f"d{names.index(g['name'])}")
+        if not res["dossiers"]:
+            st.info("مفيش ولا خبر دخل أي ملف. جرّب تجيب أخبار أكتر أو ضيف كلمات للملفات.")
+    elif view.startswith("🧵"):
+        st.caption("الخيط = أخبار فيها نفس الأطراف في أيام قريبة. مرتبة من الأهم (أخبار ومصادر وتصريحات أكتر).")
+        for n, t in enumerate(res["threads"], 1):
+            with st.expander(f"{n}. {t['name']} — {len(t['items'])} عنصر · الملف: {t['dossier']}"):
+                _dos_group(t, "الخيط", f"t{n}")
+        if not res["threads"]:
+            st.info("مفيش خيوط. جرّب تكبّر عدد الأيام أو تقلل الأطراف المشتركة لـ 1.")
+    else:
+        st.caption("كلمات وأطراف بتتكرر في أخبار مش داخلة أي ملف. لو حاجة منها مهمة، دوس «اعمله ملف».")
+        for i, sgg in enumerate(res["suggested_words"]):
+            c1, c2 = st.columns([4, 1])
+            c1.markdown(f"**{sgg['word']}** — في {sgg['news']} خبر و{sgg['posts']} منشور")
+            if c2.button("➕ اعمله ملف", key=f"dos_sg_{i}"):
+                _dos_save_cfg(dossiers_mod.add_dossier(_dos_cfg_text(), f"مقترح: {sgg['word']}", [sgg["word"]]))
+                ss["dos_msg"] = f"✅ اتعمل ملف «{sgg['word']}». دوس «اربط» تاني عشان يتملى."
+                st.rerun()
+        if res.get("suggested_entities"):
+            st.markdown("**أطراف بتظهر كتير من غير ملف:** " + "، ".join(f"{e['entity']} ({e['count']})" for e in res["suggested_entities"]))
+        if not res["suggested_words"]:
+            st.info("مفيش كلمات متكررة كفاية.")
+    st.download_button("⬇️ نزّل التقرير كامل (ملف نصي)", dossiers_mod.briefing_md(res), file_name="dossiers_report.md", key="dos_dl")
+
+
 with tab_dr:
     if IS_ADMIN:
         render_watch()
     render_daily()
+
+with tab_dos:
+    render_dossiers()
 
 with tab_sv:
     render_saved()

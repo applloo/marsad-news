@@ -10,7 +10,7 @@ API = "https://api.github.com/gists/"
 
 
 def empty():
-    return {"saved": [], "sources": [], "writers": [], "keys": [], "watch_topics": ""}
+    return {"saved": [], "sources": [], "writers": [], "keys": [], "watch_topics": "", "posts": []}
 
 
 def normalize(data):
