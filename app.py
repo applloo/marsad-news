@@ -2382,6 +2382,7 @@ DOS_HELP = """
 - **موضوع معين بعمق:** تاب «التقرير اليومي» ← «🎯 تقرير مخصص» ← اكتب المواضيع (زي `إيران + أمريكا`) ← «شغّل». بياخد من ربع ساعة لساعة على GitHub.
 - **خبر عجبك:** احفظه في المحفوظات، وهو كمان بيدخل.
 - **تحركات أمريكا وتصريحات ترامب:** ملف جاهز بالروابط بيدخل لوحده (فيه الحرب الأمريكية الإيرانية وأوكرانيا والسودان والقرن الأفريقي).
+- **📅 مدة الأخبار:** الافتراضي آخر 7 أيام، وأي خبر أقدم بيتشال. لو عايز خلفية أقدم للموضوع كبّرها لـ 14 أو 30.
 
 **2️⃣ لو فيه ترند على فيس أو تويتر:** افتح «💬 منشورات فيس وتويتر»، الصق المنشور، ودوس «➕ أضف». المنشورات بتتعامل كادعاءات مش حقايق.
 
@@ -2663,6 +2664,8 @@ def render_dossiers():
     use = st.multiselect("هات الأخبار منين؟", list(opts), default=list(opts), format_func=lambda k: opts[k], key="dos_use")
     ups = st.file_uploader("ملفات أخبار إضافية CSV (اختياري) — الأعمدة: date, source, country, title, url, summary",
                            type=["csv"], accept_multiple_files=True, key="dos_up")
+    max_days = st.select_slider("📅 الأخبار بتاعة آخر كام يوم؟ (أي حاجة أقدم من كده بتتشال)", options=[1, 2, 3, 5, 7, 14, 30],
+                                value=7, key="dos_days")
     c1, c2 = st.columns(2)
     window = c1.slider("أقصى فرق بالأيام بين خبرين في نفس الخيط", 1, 7, 3, key="dos_win")
     mins = c2.slider("أقل عدد أطراف مشتركة (زي مصر + إثيوبيا = 2)", 1, 3, 2, key="dos_min")
@@ -2676,7 +2679,7 @@ def render_dossiers():
                 if not items:
                     st.warning("مفيش أخبار. اعمل بحث في أي تاب، أو استنى التقرير اليومي، أو ضيف منشورات.")
                 else:
-                    res = dossiers_mod.run(items, dos, window, mins)
+                    res = dossiers_mod.run(items, dos, window, mins, max_days)
                     res["counts"] = counts
                     ss["dos_res"] = res
                     if PERSIST:
@@ -2690,6 +2693,11 @@ def render_dossiers():
         st.info("دوس «اربط» عشان يطلعلك الملفات والخيوط. النتيجة بتفضل محفوظة لحد ما تربط تاني.")
         return
     st.divider()
+    if res.get("max_days"):
+        st.caption(f"📅 أخبار آخر {res['max_days']} يوم بس" + (f" · اتشال {res['dropped_old']} خبر أقدم" if res.get("dropped_old") else ""))
+    if not res.get("total"):
+        st.warning("مفيش أخبار في الفترة دي. اعمل بحث في التابات أو استنى التقرير اليومي، أو كبّر عدد الأيام.")
+        return
     st.caption(f"آخر ربط: {res.get('created', '').replace('T', ' ')} · الأخبار جت من: "
                + "، ".join(f"{k} ({v})" for k, v in (res.get("counts") or {}).items() if v))
     m = st.columns(4)

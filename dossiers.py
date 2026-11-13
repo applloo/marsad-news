@@ -9,7 +9,7 @@ import os
 import re
 import unicodedata
 from collections import Counter, defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "dossiers.json")
@@ -269,9 +269,15 @@ def _stats(items, name, kind):
     }
 
 
-def run(items, dossiers, window=3, min_shared=2):
-    """يرجع نتيجة جاهزة للعرض والحفظ (كل التواريخ نصوص)"""
+def run(items, dossiers, window=3, min_shared=2, max_days=None):
+    """يرجع نتيجة جاهزة للعرض والحفظ (كل التواريخ نصوص). max_days: يشيل أي خبر أقدم من كده"""
     items = dedupe([it for it in items if it["title"]])
+    dropped = 0
+    if max_days:
+        since = date.today() - timedelta(days=max_days)
+        before = len(items)
+        items = [it for it in items if it["date"] >= since]
+        dropped = before - len(items)
     items.sort(key=lambda it: it["date"])
     _prepare(items, dossiers)
 
@@ -318,6 +324,7 @@ def run(items, dossiers, window=3, min_shared=2):
         "total": len(items), "posts": sum(1 for it in items if it["kind"] == "منشور"),
         "first": items[0]["date"] if items else None, "last": items[-1]["date"] if items else None,
         "origins": dict(origins), "window": window, "min_shared": min_shared,
+        "max_days": max_days, "dropped_old": dropped,
         "dossiers": groups, "threads": threads[:40], "n_threads": len(threads), "singles": singles,
         "suggested_words": sugg, "suggested_entities": [{"entity": e, "count": c} for e, c in ents],
     })
