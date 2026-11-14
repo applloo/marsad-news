@@ -957,18 +957,39 @@ if PERSIST and "_res_loaded" not in st.session_state:
         pass
 
 
+def _pack_res(v):
+    out = {**v, "items": (v.get("items") or [])[:200], "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    return json.loads(json.dumps(out, ensure_ascii=False, default=str))
+
+
+def reload_results():
+    """يجيب آخر نتائج محفوظة (بما فيها نتيجة البحث الشامل اللي اشتغل على GitHub) ويستبدل بيها اللي في الصفحة"""
+    got = store.load_file(GH_TOKEN, GH_GIST, RES_FILE, {}) or {}
+    st.session_state["_res_sigs"] = {}
+    n = 0
+    for _k, _v in got.items():
+        if isinstance(_v, dict) and "items" in _v:
+            st.session_state[f"res_{_k}"] = _v
+            st.session_state["_res_sigs"][_k] = _res_sig(_v)
+            n += 1
+    return n
+
+
 def save_results():
+    """بيحفظ بس التابات اللي اتغيرت في الصفحة دي، وبيدمجها فوق المحفوظ (عشان ما يمسحش نتايج البحث الشامل بتاع GitHub)"""
     if not PERSIST:
         return
     sigs = st.session_state.setdefault("_res_sigs", {})
     cur = {k[4:]: v for k, v in st.session_state.items() if k.startswith("res_") and isinstance(v, dict) and "items" in v}
-    if not cur or all(sigs.get(k) == _res_sig(v) for k, v in cur.items()):
+    changed = {k: v for k, v in cur.items() if sigs.get(k) != _res_sig(v)}
+    if not changed:
         return
     try:
-        out = {k: {**v, "items": (v.get("items") or [])[:200], "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")} for k, v in cur.items()}
-        body = json.loads(json.dumps(out, ensure_ascii=False, default=str))
-        store.save_file(GH_TOKEN, GH_GIST, RES_FILE, body)
-        st.session_state["_res_sigs"] = {k: _res_sig(v) for k, v in cur.items()}
+        remote = store.load_file(GH_TOKEN, GH_GIST, RES_FILE, {}) or {}
+        remote.update({k: _pack_res(v) for k, v in changed.items()})
+        store.save_file(GH_TOKEN, GH_GIST, RES_FILE, remote)
+        for k, v in changed.items():
+            st.session_state["_res_sigs"][k] = _res_sig(v)
     except Exception:
         pass
 
@@ -2377,12 +2398,15 @@ DOS_HELP = """
 **الفكرة:** التبويب ده مش بيدور على أخبار جديدة بنفسه. هو بيرتب الأخبار اللي التطبيق جابها قبل كده، زي واحد بيرتب الجرايد اللي على الترابيزة في ملفات.
 
 **1️⃣ جهّز الأخبار (مش لازم كلها):**
+- **🚀 الأسرع:** افتح «بحث شامل في كل المصادر مرة واحدة»، اكتب كلماتك (أو سيبها فاضية)، اختار الفترة، ودوس الزرار. GitHub بيدور في كل المصادر لوحده، ولما يخلص دوس «حدّث وحمّل النتايج». هتلاقي نتيجة كل تاب جواه زي ما هي، وكلها داخلة في الربط، وبتفضل لحد ما تبحث تاني.
 - **أسهل حاجة:** ما تعملش حاجة. التقرير اليومي بيتعمل لوحده كل صبح، والتبويب بياخد آخر 7 أيام منه.
 - **بحثك في المصادر:** ابحث في أي تاب (أمريكية، بريطانية، إسرائيلية، تركيا وإيران...). كل نتيجة بتتحفظ لوحدها في **أرشيف البحث** (العداد اللي تحت)، حتى لو عملت بحث تاني أو قفلت التطبيق.
 - **موضوع معين بعمق:** تاب «التقرير اليومي» ← «🎯 تقرير مخصص» ← اكتب المواضيع (زي `إيران + أمريكا`) ← «شغّل». بياخد من ربع ساعة لساعة على GitHub.
 - **خبر عجبك:** احفظه في المحفوظات، وهو كمان بيدخل.
 - **تحركات أمريكا وتصريحات ترامب:** ملف جاهز بالروابط بيدخل لوحده (فيه الحرب الأمريكية الإيرانية وأوكرانيا والسودان والقرن الأفريقي).
-- **📅 مدة الأخبار:** الافتراضي آخر 7 أيام، وأي خبر أقدم بيتشال. لو عايز خلفية أقدم للموضوع كبّرها لـ 14 أو 30.
+- **📅 مدة الأخبار:** من 6 ساعات لحد 30 يوم (الافتراضي 7 أيام)، وأي خبر أقدم بيتشال.
+- **🔗 اللينكات:** تختار تفتح الصفحة الأصلية (للتصوير) أو صفحة الترجمة، وجنب كل خبر لينك للتاني.
+- **ملحوظة:** لو النتيجة المعروضة قديمة، دوس «اربط واعرض» تاني عشان تتحدّث بالفترة اللي اخترتها.
 
 **2️⃣ لو فيه ترند على فيس أو تويتر:** افتح «💬 منشورات فيس وتويتر»، الصق المنشور، ودوس «➕ أضف». المنشورات بتتعامل كادعاءات مش حقايق.
 
@@ -2519,8 +2543,17 @@ def _dos_collect(use, uploads):
 def _dos_item_md(it):
     ttl = (it.get("title") or "").replace("[", "(").replace("]", ")")
     icon = "💬" if it.get("kind") == "منشور" else "📰"
-    head = f"[{ttl}]({it['url']})" if it.get("url") else ttl
-    line = f"- {icon} **{head}**  \n  {it.get('date', '')} · {it.get('source', '')} · {it.get('country') or 'بلد غير محدد'}"
+    url = it.get("url") or ""
+    if url:
+        seen = str(it.get("date", "")).replace("-", "") + "T000000Z"
+        tr_link = f"?view={quote(url, safe='')}&seen={seen}&t={quote((it.get('title') or '')[:200], safe='')}{auth_qs()}"
+        if st.session_state.get("dos_link", "orig") == "tr":
+            head, other = f"[{ttl}]({tr_link})", f" · [🌐 الأصل]({url})"
+        else:
+            head, other = f"[{ttl}]({url})", f" · [📖 مترجم]({tr_link})"
+    else:
+        head, other = ttl, ""
+    line = f"- {icon} **{head}**  \n  {it.get('date', '')} · {it.get('source', '')} · {it.get('country') or 'بلد غير محدد'}{other}"
     if it.get("statement"):
         line += " · 🎤 فيه تصريح"
     if it.get("summary"):
@@ -2633,6 +2666,118 @@ def render_dossiers_cfg():
             st.error(f"تعريف الملفات فيه مشكلة: {err}")
 
 
+SEARCH_CFG, SEARCH_STATUS = "marsad_search_cfg.json", "marsad_search_job.json"
+SEARCH_SCOPES = {"il": "🇮🇱 المصادر الإسرائيلية", "us": "🇺🇸 المصادر الأمريكية", "uk": "🇬🇧 المصادر البريطانية",
+                 "rg": "🌍 تركيا وإيران وإثيوبيا", "wr": "✍️ الكتّاب الأجانب", "wa": "🇸🇦 الكتّاب العرب"}
+PERIOD_OPTS = {"آخر 12 ساعة": 0.5, "آخر 24 ساعة": 1, "آخر يومين": 2, "آخر 3 أيام": 3, "آخر 5 أيام": 5, "آخر 7 أيام": 7}
+
+
+def _period_label(d):
+    if d is None:
+        return ""
+    d = float(d)
+    if d < 1:
+        return f"آخر {int(round(d * 24))} ساعة"
+    return "آخر 24 ساعة" if d == 1 else f"آخر {int(d)} يوم"
+
+
+def _sa_load(force=False):
+    ss = st.session_state
+    if force or "sa_cfg" not in ss:
+        try:
+            ss["sa_cfg"] = store.load_file(GH_TOKEN, GH_GIST, SEARCH_CFG, {}) or {}
+            ss["sa_status"] = store.load_file(GH_TOKEN, GH_GIST, SEARCH_STATUS, {}) or {}
+        except Exception:
+            ss.setdefault("sa_cfg", {})
+            ss.setdefault("sa_status", {})
+    return ss["sa_cfg"], ss["sa_status"]
+
+
+def render_search_all():
+    """زر واحد: بحث في كل المصادر على GitHub، والنتيجة تظهر في تاباتها وتدخل في الربط وتفضل لحد ما تبحث تاني"""
+    with st.expander("🚀 بحث شامل في كل المصادر مرة واحدة (بيشتغل على GitHub)", expanded=False):
+        if not (GH_TOKEN and GH_GIST):
+            st.info("محتاج التخزين الدائم (GITHUB_TOKEN وGIST_ID).")
+            return
+        ss = st.session_state
+        cfg, stt = _sa_load()
+        tok, repo, branch = _sec("ACTIONS_TOKEN"), _sec("GH_REPO") or gh_actions.DEFAULT_REPO, _sec("GH_BRANCH") or "main"
+        st.caption("اكتب كلماتك مرة واحدة ودوس الزرار، وسيب GitHub يدور في **كل** المصادر (إسرائيلية وأمريكية وبريطانية وتركيا وإيران وإثيوبيا والكتّاب) "
+                   "بنفس طريقة بحث كل تاب. لما يخلص، كل تاب هتلاقي فيه نتيجته زي ما هي، وكلها بتدخل في الربط، وبتفضل محفوظة لحد ما تدوس بحث جديد. "
+                   "مش لازم تفضل فاتح التطبيق.")
+        terms_txt = st.text_area("كلمات البحث (كلمة أو أكتر، افصل بفاصلة أو سطر جديد). سيبها فاضية لو عايز كل ما نُشر من غير كلمات",
+                                 value=cfg.get("terms", ""), height=90, key="sa_terms", placeholder="مثال: سد النهضة، إثيوبيا، الدعم السريع")
+        c1, c2 = st.columns(2)
+        plabels = list(PERIOD_OPTS)
+        cur_p = next((k for k, v in PERIOD_OPTS.items() if v == cfg.get("days")), "آخر 3 أيام")
+        period = c1.selectbox("الفترة", plabels, index=plabels.index(cur_p), key="sa_period")
+        joiner_lbl = c2.radio("لو كتبت أكتر من كلمة", ["أي كلمة منهم (OR)", "كل الكلمات مع بعض (AND)"], index=0 if cfg.get("joiner", "OR") == "OR" else 1,
+                              key="sa_join")
+        st.caption("💡 اقتراح: لو بتتابع حدث ساخن النهاردة اختار 12 أو 24 ساعة. للقصة الشغالة اختار 3 أيام. للصورة الأوسع 7 أيام. كل ما كبّرت الفترة، البحث بياخد وقت أطول.")
+        keys_sel = st.multiselect("ادور في إيه؟", list(SEARCH_SCOPES), default=[k for k in (cfg.get("scopes") or list(SEARCH_SCOPES)) if k in SEARCH_SCOPES],
+                                  format_func=lambda k: SEARCH_SCOPES[k], key="sa_scopes")
+        use_body = st.checkbox("🔬 ابحث كمان جوه نص المقالات (أبطأ بكتير بس بيلقط اللي كلمتك في وسطه)", value=bool(cfg.get("use_body")), key="sa_body")
+        lr = None
+        if tok:
+            t0, v0 = ss.get("sa_lr", (0, None))
+            if time.time() - t0 > 45:
+                try:
+                    v0 = gh_actions.last_run(tok, repo, "search.yml")
+                except Exception as ex:
+                    v0 = None
+                    st.caption(f"تعذّر قراءة حالة التشغيل ({type(ex).__name__}). اتأكد إنك رفعت ملف search.yml.")
+                ss["sa_lr"] = (time.time(), v0)
+            lr = v0
+        else:
+            st.warning("زرار التشغيل محتاج ACTIONS_TOKEN في Secrets (نفس اللي عملناه للتقرير اليومي).")
+        busy = bool(lr and lr["status"] in ("queued", "in_progress", "waiting", "requested"))
+        if lr:
+            ico = {"success": "✅ خلص", "failure": "❌ فشل", "cancelled": "⚪ اتلغى"}.get(lr["conclusion"] or "", "⏳ شغال دلوقتي" if busy else "—")
+            when = keys_mod.parse(lr["created"])
+            wt = when.astimezone(core.TZ).strftime("%Y-%m-%d %H:%M") if when else ""
+            st.markdown(f"آخر تشغيل: **{ico}** — بدأ {wt} (القاهرة) · [افتح التفاصيل على GitHub]({lr['url']})")
+        if stt.get("done") is not None:
+            parts = [f"{SEARCH_SCOPES.get(k, k).split(' ', 1)[-1]}: {n}" for k, n in (stt.get("counts") or {}).items()]
+            fin = keys_mod.parse(stt.get("finished") or stt.get("updated"))
+            ft = fin.astimezone(core.TZ).strftime("%Y-%m-%d %H:%M") if fin else ""
+            state = "✅ خلص" if stt.get("state") == "done" else "⏳ شغال (خلّص " + str(len(stt.get("done") or [])) + " قسم)"
+            st.markdown(f"آخر بحث شامل: **{state}** · {ft} (القاهرة) · الكلمات: {'، '.join(stt.get('terms') or []) or 'من غير كلمات (كل ما نُشر)'} · {_period_label(stt.get('days'))}"
+                        + (f"  \nعدد النتايج: {' · '.join(parts)}" if parts else ""))
+            for k, e in (stt.get("errors") or {}).items():
+                st.warning(f"{SEARCH_SCOPES.get(k, k)}: فشل ({e[:120]})")
+        if ss.get("sa_msg"):
+            st.success(ss["sa_msg"])
+        b1, b2 = st.columns(2)
+        if b1.button("▶️ ابحث في كل المصادر دلوقتي", type="primary", disabled=busy or not tok, key="sa_go", use_container_width=True):
+            if not keys_sel:
+                st.warning("اختار قسم واحد على الأقل.")
+            else:
+                new_cfg = {"terms": terms_txt, "days": PERIOD_OPTS[period], "joiner": "OR" if joiner_lbl.startswith("أي") else "AND",
+                           "scopes": keys_sel, "use_body": use_body}
+                try:
+                    store.save_file(GH_TOKEN, GH_GIST, SEARCH_CFG, new_cfg)
+                    ss["sa_cfg"] = new_cfg
+                    ok, msg = gh_actions.dispatch(tok, repo, branch, "search.yml")
+                    if ok:
+                        time.sleep(4)
+                        ss.pop("sa_lr", None)
+                        ss["sa_msg"] = f"✅ اتبعت الأمر لـ GitHub الساعة {datetime.now(core.TZ).strftime('%H:%M')}. " + msg + " ولما يخلص دوس «حدّث وحمّل النتايج»."
+                        st.rerun()
+                    st.error(msg)
+                except Exception as ex:
+                    st.error(f"مقدرتش أبدأ ({type(ex).__name__}).")
+        if b2.button("🔄 حدّث وحمّل النتايج في التابات", key="sa_refresh", use_container_width=True):
+            ss.pop("sa_msg", None)
+            ss.pop("sa_lr", None)
+            _sa_load(force=True)
+            try:
+                n = reload_results()
+                ss["sa_msg"] = f"✅ اتحمّل {n} قسم من آخر نتايج محفوظة. افتح أي تاب هتلاقي نتيجته، ودوس «اربط» تحت عشان تدخل في الخيوط."
+            except Exception as ex:
+                ss["sa_msg"] = f"تعذّر تحميل النتايج ({type(ex).__name__})."
+            st.rerun()
+
+
 def render_dossiers():
     ss = st.session_state
     st.caption("بيجمع الأخبار اللي عندك في ملفات (مواضيع ثابتة) وخيوط (قصص بتتكون لوحدها من الأخبار اللي فيها نفس الأطراف في أيام قريبة). "
@@ -2641,6 +2786,7 @@ def render_dossiers():
         st.success(ss.pop("dos_msg"))
     with st.expander("📖 ازاي تستخدم التبويب ده؟ (خطوة بخطوة)", expanded=_dos_result() is None):
         st.markdown(DOS_HELP)
+    render_search_all()
     pool = _dos_pool()
     tabs_n = Counter(a.get("tab", "") for a in pool.values())
     st.markdown(f"🔎 **أرشيف البحث:** {len(pool)} خبر من بحثك في التابات (آخر 21 يوم)"
@@ -2664,8 +2810,15 @@ def render_dossiers():
     use = st.multiselect("هات الأخبار منين؟", list(opts), default=list(opts), format_func=lambda k: opts[k], key="dos_use")
     ups = st.file_uploader("ملفات أخبار إضافية CSV (اختياري) — الأعمدة: date, source, country, title, url, summary",
                            type=["csv"], accept_multiple_files=True, key="dos_up")
-    max_days = st.select_slider("📅 الأخبار بتاعة آخر كام يوم؟ (أي حاجة أقدم من كده بتتشال)", options=[1, 2, 3, 5, 7, 14, 30],
-                                value=7, key="dos_days")
+    DAYS_OPTS = {"آخر 6 ساعات": 0.25, "آخر 12 ساعة": 0.5, "آخر 24 ساعة": 1, "آخر يومين": 2, "آخر 3 أيام": 3, "آخر 5 أيام": 5,
+                 "آخر 7 أيام": 7, "آخر 14 يوم": 14, "آخر 30 يوم": 30}
+    dl = st.select_slider("📅 الأخبار بتاعة أنهي فترة؟ (أي حاجة أقدم من كده بتتشال)", options=list(DAYS_OPTS), value="آخر 7 أيام", key="dos_days2")
+    max_days = DAYS_OPTS[dl]
+    st.caption("💡 اقتراح: **6 أو 12 ساعة** لو بتتابع حدث ساخن لسه حاصل. **24 ساعة أو 3 أيام** لقصة شغالة. **7 أيام** للصورة العامة (الافتراضي). **14 أو 30 يوم** للخلفية بس. "
+               "الأخبار اللي مفيهاش ساعة (زي ملف أمريكا والمنشورات) بتتحسب باليوم.")
+    lk = st.radio("🔗 لما أدوس على عنوان خبر يفتح إيه؟", ["🌐 الصفحة الأصلية (للتصوير والمرجع)", "📖 صفحة الترجمة"], horizontal=True, key="dos_link_r")
+    st.session_state["dos_link"] = "tr" if lk.startswith("📖") else "orig"
+    st.caption("وجنب كل خبر لينك صغير تاني للتاني، فتقدر تفتح الاتنين.")
     c1, c2 = st.columns(2)
     window = c1.slider("أقصى فرق بالأيام بين خبرين في نفس الخيط", 1, 7, 3, key="dos_win")
     mins = c2.slider("أقل عدد أطراف مشتركة (زي مصر + إثيوبيا = 2)", 1, 3, 2, key="dos_min")
@@ -2693,8 +2846,17 @@ def render_dossiers():
         st.info("دوس «اربط» عشان يطلعلك الملفات والخيوط. النتيجة بتفضل محفوظة لحد ما تربط تاني.")
         return
     st.divider()
+    cr = keys_mod.parse(res.get("created"))
+    ct = cr.strftime("%Y-%m-%d %H:%M") if cr else "؟"
     if res.get("max_days"):
-        st.caption(f"📅 أخبار آخر {res['max_days']} يوم بس" + (f" · اتشال {res['dropped_old']} خبر أقدم" if res.get("dropped_old") else ""))
+        st.caption(f"📅 أخبار {_period_label(res['max_days'])} بس" + (f" · اتشال {res['dropped_old']} خبر أقدم" if res.get("dropped_old") else "") + f" · الربط اتعمل {ct}")
+    else:
+        st.warning(f"⚠️ النتيجة دي اتعملت {ct} من غير فلتر فترة، فممكن فيها أخبار قديمة. دوس «اربط واعرض» تاني فوق عشان تتنضف.")
+    try:
+        if res.get("first") and res.get("max_days") and str(res["first"])[:10] < (datetime.utcnow() - timedelta(days=float(res["max_days"]) + 1)).strftime("%Y-%m-%d"):
+            st.warning("⚠️ النتيجة المعروضة قديمة (فيها أخبار أقدم من الفترة المختارة). دوس «اربط واعرض» تاني عشان تتحدّث.")
+    except Exception:
+        pass
     if not res.get("total"):
         st.warning("مفيش أخبار في الفترة دي. اعمل بحث في التابات أو استنى التقرير اليومي، أو كبّر عدد الأيام.")
         return

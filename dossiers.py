@@ -147,11 +147,23 @@ def parse_day(value):
         return None
 
 
-def make_item(kind, day, source, country, title, url, summary="", extra_text="", origin=""):
+def parse_dt(value):
+    """يرجع datetime (UTC بدون tz) لو القيمة فيها ساعة، وإلا None"""
+    s = str(value or "").strip()
+    m = re.match(r"(\d{4})-?(\d{2})-?(\d{2})[T ]?(\d{2}):?(\d{2})", s)
+    if not m:
+        return None
+    try:
+        return datetime(*(int(x) for x in m.groups()))
+    except ValueError:
+        return None
+
+
+def make_item(kind, day, source, country, title, url, summary="", extra_text="", origin="", when=None):
     """kind: خبر/منشور. extra_text: نص بيدخل في المطابقة بس (زي العنوان الانجليزي)"""
     return {"kind": kind, "date": day, "source": source or "مصدر غير معروف", "country": country or "",
             "title": (title or "").strip(), "url": (url or "").strip(), "summary": (summary or "").strip(),
-            "match_text": f"{title} {summary} {extra_text}", "origin": origin}
+            "match_text": f"{title} {summary} {extra_text}", "origin": origin, "when": when}
 
 
 def from_app_item(a, label_fn, country_fn, origin):
@@ -164,7 +176,8 @@ def from_app_item(a, label_fn, country_fn, origin):
         snip = " ".join(str(p) for p in a["points_ar"][:2])
     day = parse_day(a.get("seendate")) or parse_day(a.get("saved_at")) or date.today()
     return make_item("خبر", day, label_fn(dom) if dom else (a.get("outlet") or ""), a.get("country_ar") or country_fn(dom),
-                     title_ar or title, a.get("url", ""), snip, extra_text=f"{title} {a.get('title_en', '')}", origin=origin)
+                     title_ar or title, a.get("url", ""), snip, extra_text=f"{title} {a.get('title_en', '')}", origin=origin,
+                     when=parse_dt(a.get("seendate")))
 
 
 def from_post(p):
@@ -274,9 +287,14 @@ def run(items, dossiers, window=3, min_shared=2, max_days=None):
     items = dedupe([it for it in items if it["title"]])
     dropped = 0
     if max_days:
-        since = date.today() - timedelta(days=max_days)
+        now = datetime.utcnow()
+        since = (now - timedelta(days=max_days)).date()
         before = len(items)
-        items = [it for it in items if it["date"] >= since]
+        if max_days < 1:  # ساعات: لو الخبر ليه ساعة نقارن بيها، وإلا بنقارن باليوم
+            cut = now - timedelta(days=max_days)
+            items = [it for it in items if (it["when"] >= cut if it.get("when") else it["date"] >= since)]
+        else:
+            items = [it for it in items if it["date"] >= since]
         dropped = before - len(items)
     items.sort(key=lambda it: it["date"])
     _prepare(items, dossiers)
@@ -330,7 +348,7 @@ def run(items, dossiers, window=3, min_shared=2, max_days=None):
     })
 
 
-_DROP = {"match_text", "words", "entities", "dos_names"}
+_DROP = {"match_text", "words", "entities", "dos_names", "when"}
 
 
 def _jsonable(x):
