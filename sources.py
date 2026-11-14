@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """قوائم المصادر: (الاسم، الدومين — يمكن فصل أكثر من دومين بـ |، اللغة he/en/both)"""
+import re
 
 ISRAEL = {
     "📰 الصحف والمواقع": [
@@ -164,6 +165,7 @@ EGYPT = {
         ("الوفد", "alwafd.news", "ar"),
         ("المنصة", "almanassa.com", "ar"),
         ("مدى مصر", "madamasr.com", "ar"),
+        ("تليجراف مصر", "egypttelegraph.com", "ar"),
     ],
     "💰 اقتصاد وأعمال": [
         ("أموال الغد", "amwalalghad.com", "ar"),
@@ -174,9 +176,32 @@ EGYPT = {
         ("رئاسة الجمهورية", "presidency.eg", "ar"),
         ("الهيئة العامة للاستعلامات", "sis.gov.eg", "ar"),
     ],
+    "🌍 القنوات العربية — تغطيتها لمصر بس": [
+        ("العربية مصر", "alarabiya.net", "ar"),
+        ("الحدث مصر", "alhadath.net", "ar"),
+        ("الجزيرة مصر", "aljazeera.net", "ar"),
+        ("العربي الجديد مصر", "alaraby.co.uk", "ar"),
+        ("سكاي نيوز عربية مصر", "skynewsarabia.com", "ar"),
+    ],
 }
+ARAB_EG_GROUP = "🌍 القنوات العربية — تغطيتها لمصر بس"
+ARAB_EG_DOMAINS = {d for _l, d, _lg in EGYPT[ARAB_EG_GROUP]}
+EG_WORDS = re.compile(r"مصر|المصري|المصرية|مصريين|القاهر|الجيزة|الإسكندرية|الاسكندرية|السيسي|سيناء|رفح|egypt|cairo|/egypt|from_egypt", re.I)
+
+
+def egypt_only(items):
+    """أخبار القنوات العربية بتيجي كل أخبارها، فبنسيب بس اللي عن مصر (من العنوان أو الرابط). باقي المصادر زي ما هي"""
+    out = []
+    for a in items:
+        d = (a.get("domain") or "").lower().replace("www.", "")
+        if any(d == x or d.endswith("." + x) for x in ARAB_EG_DOMAINS):
+            blob = f"{a.get('title', '')} {a.get('title_ar', '')} {a.get('url', '')}"
+            if not EG_WORDS.search(blob):
+                continue
+        out.append(a)
+    return out
 EGYPT_ARABIC = {"ahram.org.eg", "almasryalyoum.com", "youm7.com", "shorouknews.com", "elwatannews.com", "madamasr.com"} | {
-    d for g in EGYPT.values() for _l, d, _lg in g}
+    d for _k, g in EGYPT.items() if _k != ARAB_EG_GROUP for _l, d, _lg in g}
 
 # ───────── القرن الأفريقي وتركيا وإيران (لغات: am أمهري، tr تركي، fa فارسي، en إنجليزي؛ يجوز الجمع "tr,en") ─────────
 REGION = {
@@ -269,9 +294,12 @@ for _title, _ents in REGION.items():
 for _ents in ARABIC.values():
     for _n, _d, _l in _ents:
         _DOM_COUNTRY.setdefault(_d, "مصر" if _d in EGYPT_ARABIC else "")
-for _ents in EGYPT.values():
+for _k, _ents in EGYPT.items():
+    if _k == ARAB_EG_GROUP:
+        continue
     for _n, _d, _l in _ents:
         _DOM_COUNTRY[_d] = "مصر"
+_DOM_COUNTRY.setdefault("alhadath.net", "السعودية")
 
 
 def source_country(domain):

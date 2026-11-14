@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 import core
 import store
 import writers as writers_mod
-from sources import ARABIC, EGYPT, ISRAEL, REGION, UK, USA, source_country
+from sources import ARABIC, EGYPT, ISRAEL, REGION, UK, USA, egypt_only, source_country
 from writers import WRITERS
 
 CFG, STATUS, RES = "marsad_search_cfg.json", "marsad_search_job.json", "marsad_results.json"
@@ -78,6 +78,8 @@ def search_scope(key, groups, gd_country, gn_country, custom, terms, cfg, log):
         d_items, d_notes = core.direct_headlines(sel, dcount)
         g_items, g_notes = core.gnews_site_search(sel, dcount, terms=None, joiner=joiner, country=gn_country, max_items=200)
         items = core.merge_items(d_items, g_items)
+        if key == "eg":
+            items = egypt_only(items)
         core.translate_titles(items)
         data.update(items=_by_url(items), used=d_notes + g_notes)
         if not items:

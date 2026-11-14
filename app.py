@@ -26,7 +26,7 @@ import keys as keys_mod
 import store
 import time
 import writers as writers_mod
-from sources import ARABIC, EGYPT, EGYPT_ARABIC, FLAGS, ISRAEL, REGION, SECTIONS, UK, USA, source_country
+from sources import ARAB_EG_GROUP, ARABIC, EGYPT, EGYPT_ARABIC, FLAGS, ISRAEL, REGION, SECTIONS, UK, USA, egypt_only, source_country
 from writers import WRITERS
 
 DOMAIN_LABELS = {}
@@ -1406,6 +1406,8 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
                     d_items, d_notes = core.direct_headlines(sel, days_in_range())
                     g_items, g_notes = core.gnews_site_search(sel, days_in_range(), terms=None, joiner=joiner, country=gn_country, max_items=200)
                     items, notes = core.merge_items(d_items, g_items), d_notes + g_notes
+                    if key in ("eg", "egt"):
+                        items = egypt_only(items)
                     if ctype != "الكل":
                         items = [a for a in items if a.get("ctype") == ctype]
                     core.translate_titles(items)
@@ -1623,31 +1625,6 @@ with tab_rg:
     st.caption("إثيوبيا (سد النهضة والقرن الأفريقي) وتركيا (شرق المتوسط) وإيران (اليمن والخليج). يُترجم بحثك تلقائياً إلى الأمهرية "
                "أو التركية أو الفارسية أو الإنجليزية بحسب لغة كل مصدر. اختر مصدراً واحداً أو عدة مصادر أو كلها، أو ابحث داخل مصدر واحد.")
     curated_tab("rg", REGION, None, "US", "ابحث في مصادر تركيا وإيران وإثيوبيا")
-
-EG_PRESETS = {
-    "🚨 جرائم وحوادث": "جريمة، مقتل، القبض على، النيابة العامة، حادث",
-    "⚖️ قوانين وقرارات": "قانون، مجلس النواب، قرار جمهوري، الجريدة الرسمية، تعديل تشريعي",
-    "💰 اقتصاد وأسعار": "الدولار، الجنيه، التضخم، الأسعار، الدعم، البنك المركزي",
-    "🇸🇩 الحدود مع السودان": "السودان، الحدود، لاجئين، أرقين، حلايب",
-    "🇵🇸 غزة ورفح": "غزة، رفح، معبر رفح، فلسطين، المساعدات",
-    "💍 مجتمع وأحوال شخصية": "زواج، طلاق، أسرة، قضية رأي عام",
-    "🏥 صحة وتعليم": "المستشفيات، التأمين الصحي، الثانوية العامة، الجامعات، التعليم",
-    "⛽ خدمات وطاقة": "الكهرباء، انقطاع الكهرباء، الوقود، البنزين، المياه",
-}
-
-with tab_eg:
-    use_filters("eg", "full")
-    st.caption("أخبار الشأن الداخلي المصري من صحف ومواقع مصرية بس: جرائم وحوادث، ومجتمع، واقتصاد وأسعار، وقوانين وقرارات، والحدود، والخدمات. "
-               "اختار موضوع جاهز تحت أو اكتب كلماتك في الخانة فوق. وللشرح (القانون ده بيعمل إيه ولزمته إيه) روح تاب «🧵 الملفات والخيوط» واختار «📜 شرح للمواطن».")
-    pre = st.multiselect("🎯 مواضيع جاهزة (بتدور على كلماتها كلها)", list(EG_PRESETS), key="eg_pre")
-    if pre:
-        if query.strip():
-            st.caption("كلماتك اللي فوق هي اللي بتتستخدم (المواضيع الجاهزة بتشتغل لما الخانة تبقى فاضية).")
-        else:
-            query = "، ".join(EG_PRESETS[p] for p in pre)
-            joiner = "OR"
-            st.caption(f"هيدور على: {query}")
-    curated_tab("eg", EGYPT, "EG", "EG", "ابحث في المصادر المصرية")
 
 DAY_OPTS = {"آخر 24 ساعة": 1, "آخر 3 أيام": 3, "آخر 7 أيام": 7, "آخر 14 يوماً": 14, "آخر 30 يوماً": 30}
 
@@ -2416,7 +2393,7 @@ def render_watch():
 
 # ───────── 🧵 الملفات والخيوط: ربط كل الأخبار في ملفات وخيوط + منشورات فيس وتويتر + برومبت تحليل جاهز ─────────
 DOS_RES_FILE, DOS_CFG_FILE = "marsad_dossiers.json", "marsad_dossiers_cfg.json"
-TAB_LABELS = {"il": "الإسرائيلية", "us": "الأمريكية", "uk": "البريطانية", "rg": "تركيا وإيران وإثيوبيا", "eg": "الشأن المصري", "ml": "ترجمة ثم بحث",
+TAB_LABELS = {"il": "الإسرائيلية", "us": "الأمريكية", "uk": "البريطانية", "rg": "تركيا وإيران وإثيوبيا", "eg": "الشأن المصري", "egt": "تتبّع موضوع", "ml": "ترجمة ثم بحث",
               "wr": "الكتّاب", "gd": "GDELT", "br": "تصفّح مصدر", "in": "مكتب الاستخبارات",
               "in_all": "مكتب الاستخبارات", "home": "البحث السريع"}
 DOS_HELP = """
@@ -2605,9 +2582,12 @@ def _dos_group(g, scope, key):
             st.markdown("\n".join(_dos_item_md(it) for it in us[-15:]))
     with tabs[-1]:
         st.caption("فيه المبادئ كلها: الدوافع، التبعات، الأحداث، الترابط، التصريحات ونتيجتها، قصد كل جريدة، وجهة نظر تانية، والحبكة.")
-        kind = st.radio("عايز إيه؟", ["🎬 اسكريبت 1 (عامية قاهرية، هوك وأفيهات وربط)", "🎬 اسكريبت 2 (نفس الروح + جدول وقايع وقواعد دقة)", "🧭 اسكريبت 3 (قراءة المشهد من وجهة نظرك)", "📜 شرح للمواطن (قانون / قرار / اقتصاد / جريمة)", "🧠 تحليل بس"], horizontal=True, key=f"dos_pk_{key}")
+        kinds = ["🎬 اسكريبت 1 (عامية قاهرية، هوك وأفيهات وربط)", "🎬 اسكريبت 2 (نفس الروح + جدول وقايع وقواعد دقة)", "🧭 اسكريبت 3 (قراءة المشهد من وجهة نظرك)", "📜 شرح للمواطن (قانون / قرار / اقتصاد / جريمة)", "🧠 تحليل بس"]
+        if scope == "الموضوع":
+            kinds = ["🔎 تقرير تتبّع الموضوع (خط زمني + مقارنة المصادر + استنتاج)"] + kinds
+        kind = st.radio("عايز إيه؟", kinds, horizontal=True, key=f"dos_pk_{key}")
         egy = True
-        if not (kind.startswith("🧠") or kind.startswith("📜")):
+        if not (kind.startswith("🧠") or kind.startswith("📜") or kind.startswith("🔎")):
             egy = st.checkbox("🇪🇬 اكتب من منظور مصري وعربي (القضية الفلسطينية مركزية، والمقياس هو مصلحتنا)", value=True, key=f"dos_egy_{key}")
         if kind.startswith("🎬"):
             mins = st.select_slider("مدة الفيديو (دقايق)", options=[3, 5, 8, 10, 15, 20], value=8, key=f"dos_pm_{key}")
@@ -2620,6 +2600,8 @@ def _dos_group(g, scope, key):
             txt = dossiers_mod.script_prompt3(scope, g, mins, view, egypt=egy)
         elif kind.startswith("📜"):
             txt = dossiers_mod.explain_prompt(scope, g)
+        elif kind.startswith("🔎"):
+            txt = dossiers_mod.topic_prompt(g)
         else:
             txt = dossiers_mod.prompt_for(scope, g)
         st.info("📋 دوس علامة النسخ اللي فوق على الشمال في المربع الرمادي، وبعدين الصقه في شات Claude.")
@@ -2657,6 +2639,115 @@ def render_posts():
                     s["posts"].pop(i)
                     persist()
                     st.rerun()
+
+
+def render_topic_track():
+    """تتبّع موضوع كامل: بيدور عليه في كل المصادر المصرية (والعربية لو عايز)، يجمع الأخبار ويربطها في خيوط، ويطلّعلك برومبت تحليل"""
+    st.markdown("### 🔎 تتبّع موضوع كامل (من كل المصادر)")
+    st.caption("اكتب الموضوع زي ما بتقوله (مثال: ارتفاع أسعار الطماطم في الأسواق، أو جريمة عروس الإسماعيلية). هيدور عليه في كل المصادر اللي تختارها، "
+               "ويجمّع الأخبار في ملف واحد مرتب بالتاريخ، ويربطها في خيوط، ويجهزلك برومبت تحليل واستنتاج. المنشورات اللي ضفتها في «💬 منشورات فيس وتويتر» بتدخل لو فيها نفس الكلمات.")
+    c1, c2 = st.columns([3, 2])
+    topic = c1.text_input("🎯 الموضوع", key="egt_topic", placeholder="ارتفاع أسعار الطماطم في الأسواق")
+    alts = c2.text_input("كلمات بديلة (بفاصلة)", key="egt_alts", placeholder="سعر الطماطم، الطماطم، أسعار الخضار")
+    c3, c4 = st.columns(2)
+    days = c3.select_slider("الفترة (أيام)", options=[1, 3, 7, 14, 30, 60], value=7, key="egt_days")
+    scope = c4.radio("هدور فين؟", ["🇪🇬 المصادر المصرية بس", "🇪🇬 + القنوات العربية (تغطيتها لمصر)", "🌐 كل حاجة (مصرية وعربية وإسرائيلية وأمريكية وبريطانية)"], key="egt_scope")
+    local = [e for g, ents in EGYPT.items() if g != ARAB_EG_GROUP for e in ents]
+    sel = list(local)
+    if scope.startswith("🇪🇬 +") or scope.startswith("🌐"):
+        sel += list(EGYPT[ARAB_EG_GROUP])
+    if scope.startswith("🌐"):
+        seen = {e[1] for e in sel}
+        sel += [e for gg in (ARABIC, ISRAEL, USA, UK) for ents in gg.values() for e in ents if e[1] not in seen]
+    sel += [(x["label"], x["domain"], x["lang"]) for x in S()["sources"] if x["group"] in ("eg", "egt")]
+    st.caption(f"عدد المصادر اللي هيدور فيها: {len(sel)}")
+    if st.button("🔎 تتبّع الموضوع", type="primary", use_container_width=True, key="egt_go"):
+        if not topic.strip():
+            st.warning("اكتب الموضوع الأول.")
+        else:
+            terms = [topic.strip()] + [t.strip() for t in TERM_SPLIT.split(alts) if t.strip()]
+            g_ = globals()
+            keep = {k: g_[k] for k in ("query", "match", "joiner", "ctype", "start_utc", "end_utc", "max_rec", "verify", "hide_nomatch")}
+            end_ = datetime.now(timezone.utc)
+            g_.update(query="، ".join(terms), match=core.MATCH_MODES[0], joiner="OR", ctype="الكل",
+                      start_utc=end_ - timedelta(days=days), end_utc=end_, max_rec=40, verify=True, hide_nomatch=True)
+            try:
+                seed, gnotes = [], []
+                with st.spinner("جارٍ جلب نتائج أخبار Google أولاً…"):
+                    try:
+                        seed, gnotes = gn_seed(sel, "EG", terms)
+                    except Exception as ex:
+                        gnotes = [f"Google News تعذّر: {type(ex).__name__}"]
+                do_search("egt", core.jobs_for_sources(sel, "EG"), sel, terms=terms, seed=seed)
+                if gnotes and st.session_state.get("res_egt"):
+                    st.session_state["res_egt"]["used"] += gnotes
+                try:
+                    direct_title_hits("egt", sel, terms)
+                except Exception as ex:
+                    st.caption(f"تعذّر البحث المباشر في الخلاصات: {type(ex).__name__}")
+            finally:
+                g_.update(keep)
+            res_ = st.session_state.get("res_egt")
+            if res_ is not None:
+                res_.update(topic=topic.strip(), alts=alts.strip(), days=days, created=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    res = st.session_state.get("res_egt") or {}
+    if not res.get("topic"):
+        return
+    st.markdown(f"#### 📌 {res['topic']}" + (f" — خلال آخر {res.get('days', '?')} يوم" if res.get("days") else ""))
+    lab = lambda d: about_plain(re.sub(r"<[^>]+>", "", html.unescape(src_label(d, with_domain=False))).split("·")[0])
+    items = [dossiers_mod.from_app_item(a, lab, source_country, "تتبّع موضوع") for a in res.get("items") or []
+             if isinstance(a, dict) and a.get("url") and (a.get("title") or a.get("title_ar"))]
+    words = [res["topic"]] + [t.strip() for t in TERM_SPLIT.split(res.get("alts", "")) if t.strip()]
+    if st.checkbox("💬 ضمّ منشوراتي (فيس/تويتر) اللي فيها كلمات الموضوع", value=True, key="egt_posts"):
+        pats = [dossiers_mod.make_pattern([w]) for w in words]
+        for p_ in S().get("posts", []):
+            if any(pt is not None and pt.search(dossiers_mod.normalize(p_.get("text", ""))) for pt in pats):
+                items.append(dossiers_mod.from_post(p_))
+    if not items:
+        st.info("مفيش نتائج للموضوع ده في الفترة دي. جرّب كلمات بديلة أو فترة أطول أو مصادر أكتر.")
+    else:
+        r = dossiers_mod.run(items, [], 3, 2, res.get("days"), topic=res["topic"])
+        if r["dossiers"]:
+            _dos_group(r["dossiers"][0], "الموضوع", "egt")
+        if r["threads"]:
+            st.markdown(f"**🧵 الخيوط اللي طلعت جوا الموضوع ({r['n_threads']})**")
+            labels = [f"{n}. {t['name']} — {len(t['items'])} عنصر · {t['first']} → {t['last']}" for n, t in enumerate(r["threads"][:8], 1)]
+            pick = st.selectbox("اختار خيط تشوفه", labels, key="egt_thread")
+            n = labels.index(pick) + 1
+            _dos_group(r["threads"][n - 1], "الخيط", f"egt_t{n}")
+    if st.toggle("📄 اعرض كروت نتائج البحث (الأصل والترجمة)", key="egt_cards"):
+        render_results("egt")
+
+
+
+EG_PRESETS = {
+    "🚨 جرائم وحوادث": "جريمة، مقتل، القبض على، النيابة العامة، حادث",
+    "⚖️ قوانين وقرارات": "قانون، مجلس النواب، قرار جمهوري، الجريدة الرسمية، تعديل تشريعي",
+    "💰 اقتصاد وأسعار": "الدولار، الجنيه، التضخم، الأسعار، الدعم، البنك المركزي",
+    "🇸🇩 الحدود مع السودان": "السودان، الحدود، لاجئين، أرقين، حلايب",
+    "🇵🇸 غزة ورفح": "غزة، رفح، معبر رفح، فلسطين، المساعدات",
+    "💍 مجتمع وأحوال شخصية": "زواج، طلاق، أسرة، قضية رأي عام",
+    "🏥 صحة وتعليم": "المستشفيات، التأمين الصحي، الثانوية العامة، الجامعات، التعليم",
+    "⛽ خدمات وطاقة": "الكهرباء، انقطاع الكهرباء، الوقود، البنزين، المياه",
+}
+
+with tab_eg:
+    use_filters("eg", "full")
+    st.caption("أخبار الشأن الداخلي المصري من صحف ومواقع مصرية بس: جرائم وحوادث، ومجتمع، واقتصاد وأسعار، وقوانين وقرارات، والحدود، والخدمات. "
+               "اختار موضوع جاهز تحت أو اكتب كلماتك في الخانة فوق. وللشرح (القانون ده بيعمل إيه ولزمته إيه) روح تاب «🧵 الملفات والخيوط» واختار «📜 شرح للمواطن».")
+    pre = st.multiselect("🎯 مواضيع جاهزة (بتدور على كلماتها كلها)", list(EG_PRESETS), key="eg_pre")
+    if pre:
+        if query.strip():
+            st.caption("كلماتك اللي فوق هي اللي بتتستخدم (المواضيع الجاهزة بتشتغل لما الخانة تبقى فاضية).")
+        else:
+            query = "، ".join(EG_PRESETS[p] for p in pre)
+            joiner = "OR"
+            st.caption(f"هيدور على: {query}")
+    eg_mode = st.radio("عايز إيه؟", ["🔎 تتبّع موضوع كامل (أسعار الطماطم، جريمة معينة…) من كل المصادر", "📰 بحث عادي في المصادر"], key="eg_mode")
+    if eg_mode.startswith("🔎"):
+        render_topic_track()
+    else:
+        curated_tab("eg", EGYPT, "EG", "EG", "ابحث في المصادر المصرية")
 
 
 def render_dossiers_cfg():
