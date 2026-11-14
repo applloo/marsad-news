@@ -2743,8 +2743,8 @@ with tab_eg:
             query = "، ".join(EG_PRESETS[p] for p in pre)
             joiner = "OR"
             st.caption(f"هيدور على: {query}")
-    eg_mode = st.radio("عايز إيه؟", ["🔎 تتبّع موضوع كامل (أسعار الطماطم، جريمة معينة…) من كل المصادر", "📰 بحث عادي في المصادر"], key="eg_mode")
-    if eg_mode.startswith("🔎"):
+    eg_view = st.radio("عايز إيه؟", ["🔎 تتبّع موضوع كامل (أسعار الطماطم، جريمة معينة…) من كل المصادر", "📰 بحث عادي في المصادر"], key="eg_view")
+    if eg_view.startswith("🔎"):
         render_topic_track()
     else:
         curated_tab("eg", EGYPT, "EG", "EG", "ابحث في المصادر المصرية")
