@@ -2607,13 +2607,19 @@ def _dos_group(g, scope, key):
     with tabs[-1]:
         st.caption("فيه المبادئ كلها: الدوافع، التبعات، الأحداث، الترابط، التصريحات ونتيجتها، قصد كل جريدة، وجهة نظر تانية، والحبكة.")
         kinds = ["🎬 اسكريبت 1 (عامية قاهرية، هوك وأفيهات وربط)", "🎬 اسكريبت 2 (نفس الروح + جدول وقايع وقواعد دقة)", "🧭 اسكريبت 3 (قراءة المشهد من وجهة نظرك)", "📜 شرح للمواطن (قانون / قرار / اقتصاد / جريمة)", "🧠 تحليل بس"]
-        if scope == "الموضوع":
-            kinds = ["🔎 تقرير تتبّع الموضوع (خط زمني + مقارنة المصادر + استنتاج)"] + kinds
+        eg_mode_ = key.startswith("_eg") or key.startswith("egt")
+        if eg_mode_:
+            kinds = ["🇪🇬 اسكريبت شأن مصري (للمواطن، من غير سياسة المنطقة)"] + kinds
+        if scope == "الموضوع" or eg_mode_:
+            kinds = ["🔎 تقرير تتبّع (خط زمني + مقارنة المصادر + استنتاج)"] + kinds
         kind = st.radio("عايز إيه؟", kinds, horizontal=True, key=f"dos_pk_{key}")
         egy = True
-        if not (kind.startswith("🧠") or kind.startswith("📜") or kind.startswith("🔎")):
-            egy = st.checkbox("🇪🇬 اكتب من منظور مصري وعربي (القضية الفلسطينية مركزية، والمقياس هو مصلحتنا)", value=True, key=f"dos_egy_{key}")
-        if kind.startswith("🎬"):
+        if not (kind.startswith("🧠") or kind.startswith("📜") or kind.startswith("🔎") or kind.startswith("🇪🇬")):
+            egy = st.checkbox("🇪🇬 اكتب من منظور مصري وعربي (القضية الفلسطينية مركزية، والمقياس هو مصلحتنا)", value=not eg_mode_, key=f"dos_egy_{key}")
+        if kind.startswith("🇪🇬"):
+            mins = st.select_slider("مدة الفيديو (دقايق)", options=[3, 5, 8, 10, 15, 20], value=8, key=f"dos_pme_{key}")
+            txt = dossiers_mod.eg_script_prompt(g, mins)
+        elif kind.startswith("🎬"):
             mins = st.select_slider("مدة الفيديو (دقايق)", options=[3, 5, 8, 10, 15, 20], value=8, key=f"dos_pm_{key}")
             txt = dossiers_mod.script_prompt2(scope, g, mins, egypt=egy) if kind.startswith("🎬 اسكريبت 2") else dossiers_mod.script_prompt(scope, g, mins, egypt=egy)
         elif kind.startswith("🧭"):
