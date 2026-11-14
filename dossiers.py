@@ -105,11 +105,20 @@ def default_config_text():
         return f.read()
 
 
-def merge_defaults(text):
+EGYPT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dossiers_eg.json")
+
+
+def egypt_config_text():
+    """الملفات الجاهزة بتاعة الشأن المصري (منفصلة تماماً عن ملفات السياسة في المنطقة)"""
+    with open(EGYPT_CONFIG_PATH, encoding="utf-8") as f:
+        return f.read()
+
+
+def merge_defaults(text, egypt=False):
     """يضيف للتعريف المحفوظ أي ملف جاهز جديد (باسمه) مش موجود. يرجع (نص جديد، قايمة الاسماء المضافة)"""
     cur = json.loads(text)
     have = {x.get("name") for x in cur}
-    add = [x for x in json.loads(default_config_text()) if x.get("name") not in have]
+    add = [x for x in json.loads(egypt_config_text() if egypt else default_config_text()) if x.get("name") not in have]
     return json.dumps(cur + add, ensure_ascii=False, indent=1), [x["name"] for x in add]
 
 

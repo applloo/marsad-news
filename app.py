@@ -2393,7 +2393,10 @@ def render_watch():
 
 # ───────── 🧵 الملفات والخيوط: ربط كل الأخبار في ملفات وخيوط + منشورات فيس وتويتر + برومبت تحليل جاهز ─────────
 DOS_RES_FILE, DOS_CFG_FILE = "marsad_dossiers.json", "marsad_dossiers_cfg.json"
-TAB_LABELS = {"il": "الإسرائيلية", "us": "الأمريكية", "uk": "البريطانية", "rg": "تركيا وإيران وإثيوبيا", "eg": "الشأن المصري", "egt": "تتبّع موضوع", "ml": "ترجمة ثم بحث",
+EG_TABS = {"eg", "egt"}  # تابات الشأن المصري: نتايجها بتروح لربط الشأن المصري بس، ومبتتخلطش بالسياسة الإقليمية
+PROFS = {"pol": {"sx": "", "cfg_file": DOS_CFG_FILE, "res_file": DOS_RES_FILE, "cfg_key": "dos_cfg", "res_key": "dos_res"},
+         "eg": {"sx": "_eg", "cfg_file": "marsad_dossiers_eg_cfg.json", "res_file": "marsad_dossiers_eg.json", "cfg_key": "dos_cfg_eg", "res_key": "dos_res_eg"}}
+TAB_LABELS = {"il": "الإسرائيلية", "us": "الأمريكية", "uk": "البريطانية", "rg": "تركيا وإيران وإثيوبيا", "eg": "الشأن المصري", "egt": "تتبّع موضوع", "trend": "ترند/موضوع طارئ", "ml": "ترجمة ثم بحث",
               "wr": "الكتّاب", "gd": "GDELT", "br": "تصفّح مصدر", "in": "مكتب الاستخبارات",
               "in_all": "مكتب الاستخبارات", "home": "البحث السريع"}
 DOS_HELP = """
@@ -2423,39 +2426,40 @@ DOS_HELP = """
 POST_PLATFORMS = ["فيسبوك", "تويتر / X", "تيك توك", "يوتيوب", "تليجرام", "تاني"]
 
 
-def _dos_cfg_text():
-    ss = st.session_state
-    if "dos_cfg" not in ss:
+def _dos_cfg_text(P="pol"):
+    ss, pf = st.session_state, PROFS[P]
+    if pf["cfg_key"] not in ss:
         txt = None
         if PERSIST:
             try:
-                txt = (store.load_file(GH_TOKEN, GH_GIST, DOS_CFG_FILE, {}) or {}).get("text")
+                txt = (store.load_file(GH_TOKEN, GH_GIST, pf["cfg_file"], {}) or {}).get("text")
             except Exception:
                 txt = None
-        ss["dos_cfg"] = txt or dossiers_mod.default_config_text()
-    return ss["dos_cfg"]
+        ss[pf["cfg_key"]] = txt or (dossiers_mod.egypt_config_text() if P == "eg" else dossiers_mod.default_config_text())
+    return ss[pf["cfg_key"]]
 
 
-def _dos_save_cfg(text):
-    st.session_state["dos_cfg"] = text
-    st.session_state.pop("dos_cfg_edit", None)  # عشان مربع التعديل يعرض النسخة الجديدة
+def _dos_save_cfg(text, P="pol"):
+    pf = PROFS[P]
+    st.session_state[pf["cfg_key"]] = text
+    st.session_state.pop("dos_cfg_edit" + pf["sx"], None)  # عشان مربع التعديل يعرض النسخة الجديدة
     if PERSIST:
         try:
-            store.save_file(GH_TOKEN, GH_GIST, DOS_CFG_FILE, {"text": text})
+            store.save_file(GH_TOKEN, GH_GIST, pf["cfg_file"], {"text": text})
         except Exception as e:
             st.session_state["dos_msg"] = f"⚠️ اتغيرت الملفات بس ما اتحفظتش في التخزين الدائم ({type(e).__name__})"
 
 
-def _dos_result():
-    ss = st.session_state
-    if "dos_res" not in ss:
-        ss["dos_res"] = None
+def _dos_result(P="pol"):
+    ss, pf = st.session_state, PROFS[P]
+    if pf["res_key"] not in ss:
+        ss[pf["res_key"]] = None
         if PERSIST:
             try:
-                ss["dos_res"] = store.load_file(GH_TOKEN, GH_GIST, DOS_RES_FILE, None)
+                ss[pf["res_key"]] = store.load_file(GH_TOKEN, GH_GIST, pf["res_file"], None)
             except Exception:
                 pass
-    return ss["dos_res"]
+    return ss[pf["res_key"]]
 
 
 DOS_POOL_FILE = "marsad_dos_pool.json"
@@ -2478,9 +2482,16 @@ def _dos_pool():
         if not (k.startswith("res_") and isinstance(v, dict)) or v.get("partial"):
             continue
         for a in v.get("items") or []:
-            if isinstance(a, dict) and a.get("url") and a["url"] not in pool:
-                pool[a["url"]] = {**{f: a[f] for f in POOL_KEYS if a.get(f)}, "pooled": now, "tab": k[4:]}
+            if not (isinstance(a, dict) and a.get("url")):
+                continue
+            if a["url"] not in pool:
+                pool[a["url"]] = {**{f: a[f] for f in POOL_KEYS if a.get(f)}, "pooled": now, "tab": k[4:], "tabs": [k[4:]]}
                 added += 1
+            else:
+                tl = pool[a["url"]].setdefault("tabs", [pool[a["url"]].get("tab", "")])
+                if k[4:] not in tl:
+                    tl.append(k[4:])
+                    added += 1
     if added:
         cut = (datetime.now(timezone.utc) - timedelta(days=21)).strftime("%Y%m%d")
         keep = sorted(pool.values(), key=lambda a: a.get("pooled", ""), reverse=True)
@@ -2494,7 +2505,17 @@ def _dos_pool():
     return pool
 
 
-def _dos_collect(use, uploads):
+def _pool_for(P):
+    """أخبار الأرشيف بتاعة القسم ده بس: الشأن المصري لوحده، والسياسة الإقليمية لوحدها"""
+    out = []
+    for a in _dos_pool().values():
+        tabs = set(a.get("tabs") or [a.get("tab", "")])
+        if (P == "eg" and tabs & EG_TABS) or (P != "eg" and tabs - EG_TABS):
+            out.append(a)
+    return out
+
+
+def _dos_collect(use, uploads, P="pol"):
     """يجمع الأخبار من كل الأماكن اللي اخترتها في التطبيق"""
     lab = lambda d: about_plain(re.sub(r"<[^>]+>", "", html.unescape(src_label(d, with_domain=False))).split("·")[0])
     out, counts = [], {}
@@ -2508,7 +2529,9 @@ def _dos_collect(use, uploads):
         counts[origin] = counts.get(origin, 0) + n
 
     if "بحث" in use:
-        add(list(_dos_pool().values()), "نتايج البحث")
+        add(_pool_for(P), "نتايج البحث")
+    if P == "eg":
+        use = [u for u in use if u == "بحث"]
     if "يومي" in use and _GT and _GG:
         try:
             if "reports" not in st.session_state:
@@ -2536,7 +2559,7 @@ def _dos_collect(use, uploads):
             counts[f"ملف: {up.name}"] = len(got)
         except Exception as e:
             st.warning(f"الملف {up.name} مش مقروء: {e}")
-    posts = [dossiers_mod.from_post(p) for p in S().get("posts", [])]
+    posts = [dossiers_mod.from_post(p) for p in S().get("posts", []) if (p.get("scope") or "pol") == P]
     out += posts
     counts["منشورات فيس وتويتر"] = len(posts)
     return out, counts
@@ -2608,12 +2631,13 @@ def _dos_group(g, scope, key):
         st.code(txt, language=None)
 
 
-def render_posts():
+def render_posts(P="pol"):
+    sx = PROFS[P]["sx"]
     s = S()
     s.setdefault("posts", [])
     st.caption("الصق هنا اي منشور من فيس او تويتر عن ترند او قضية، وهيتخلط مع الاخبار في نفس الملفات والخيوط. "
                "المنشورات بتتعامل كادعاءات محتاجة تحقق، مش كأخبار مؤكدة.")
-    with st.form("dos_post_form", clear_on_submit=True):
+    with st.form(f"dos_post_form{sx}", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         pdate = c1.date_input("تاريخ المنشور", value=datetime.now(core.TZ).date())
         plat = c2.selectbox("المنصة", POST_PLATFORMS)
@@ -2625,43 +2649,64 @@ def render_posts():
         if st.form_submit_button("➕ أضف المنشور", use_container_width=True):
             if text.strip():
                 s["posts"].insert(0, {"date": pdate.isoformat(), "platform": plat, "author": author.strip(),
-                                      "text": text.strip(), "url": url.strip(), "country": country.strip()})
+                                      "text": text.strip(), "url": url.strip(), "country": country.strip(), "scope": P})
                 persist()
                 st.session_state["dos_msg"] = "✅ المنشور اتضاف. دوس «اربط» تاني عشان يدخل في التحليل."
             else:
                 st.warning("اكتب نص المنشور الأول.")
-    if s["posts"] and st.toggle(f"💬 اعرض المنشورات المحفوظة ({len(s['posts'])})", key="dos_show_posts"):
+    mine = [(i0, p0) for i0, p0 in enumerate(s["posts"]) if (p0.get("scope") or "pol") == P]
+    if mine and st.toggle(f"💬 اعرض المنشورات المحفوظة ({len(mine)})", key=f"dos_show_posts{sx}"):
         if True:
-            for i, p in enumerate(list(s["posts"])):
+            for i, p in mine:
                 c1, c2 = st.columns([6, 1])
                 c1.markdown(f"**{p.get('platform', '')} · {p.get('author') or 'حساب'}** · {p.get('date', '')}  \n{p.get('text', '')[:400]}")
-                if c2.button("🗑️ امسح", key=f"dos_pdel_{i}"):
+                if c2.button("🗑️ امسح", key=f"dos_pdel{sx}_{i}"):
                     s["posts"].pop(i)
                     persist()
                     st.rerun()
 
 
-def render_topic_track():
-    """تتبّع موضوع كامل: بيدور عليه في كل المصادر المصرية (والعربية لو عايز)، يجمع الأخبار ويربطها في خيوط، ويطلّعلك برومبت تحليل"""
-    st.markdown("### 🔎 تتبّع موضوع كامل (من كل المصادر)")
-    st.caption("اكتب الموضوع زي ما بتقوله (مثال: ارتفاع أسعار الطماطم في الأسواق، أو جريمة عروس الإسماعيلية). هيدور عليه في كل المصادر اللي تختارها، "
-               "ويجمّع الأخبار في ملف واحد مرتب بالتاريخ، ويربطها في خيوط، ويجهزلك برومبت تحليل واستنتاج. المنشورات اللي ضفتها في «💬 منشورات فيس وتويتر» بتدخل لو فيها نفس الكلمات.")
+def render_topic_track(P="eg"):
+    """تتبّع موضوع أو ترند: بيدور عليه في المصادر، يجمّع الأخبار في ملف واحد وخيوط، ويطلّعلك برومبت تحليل. P = "eg" للشأن المصري، "pol" للسياسة والمنطقة"""
+    egp = P == "eg"
+    pk, rk = ("egt", "egt") if egp else ("trd", "trend")
+    st.markdown("### 🔎 تتبّع موضوع كامل (من كل المصادر)" if egp else "### 🔎 تتبّع ترند أو موضوع طارئ")
+    st.caption("اكتب الموضوع زي ما بتقوله (" + ("مثال: ارتفاع أسعار الطماطم في الأسواق، أو جريمة عروس الإسماعيلية" if egp else
+               "مثال: وقف الطيران الأمريكي بين الولايات، أو توقف مايكروسوفت في دول كتير") + "). هيدور عليه في المصادر اللي تختارها، "
+               "ويجمّع الأخبار في ملف واحد مرتب بالتاريخ، ويربطها في خيوط، ويجهزلك برومبت تحليل واستنتاج. المنشورات اللي ضفتها في «💬 منشورات فيس وتويتر» بتدخل لو فيها نفس الكلمات. "
+               "ولو الموضوع هيفضل معاك، دوس تحت «💾 خلّيه ملف دائم».")
     c1, c2 = st.columns([3, 2])
-    topic = c1.text_input("🎯 الموضوع", key="egt_topic", placeholder="ارتفاع أسعار الطماطم في الأسواق")
-    alts = c2.text_input("كلمات بديلة (بفاصلة)", key="egt_alts", placeholder="سعر الطماطم، الطماطم، أسعار الخضار")
+    topic = c1.text_input("🎯 الموضوع", key=f"{pk}_topic", placeholder="ارتفاع أسعار الطماطم في الأسواق" if egp else "وقف الطيران الأمريكي بين الولايات")
+    alts = c2.text_input("كلمات بديلة (بفاصلة)", key=f"{pk}_alts", placeholder="سعر الطماطم، الطماطم، أسعار الخضار" if egp else "ground stop، FAA، تأخير الرحلات، مطارات أمريكا")
     c3, c4 = st.columns(2)
-    days = c3.select_slider("الفترة (أيام)", options=[1, 3, 7, 14, 30, 60], value=7, key="egt_days")
-    scope = c4.radio("هدور فين؟", ["🇪🇬 المصادر المصرية بس", "🇪🇬 + القنوات العربية (تغطيتها لمصر)", "🌐 كل حاجة (مصرية وعربية وإسرائيلية وأمريكية وبريطانية)"], key="egt_scope")
-    local = [e for g, ents in EGYPT.items() if g != ARAB_EG_GROUP for e in ents]
-    sel = list(local)
-    if scope.startswith("🇪🇬 +") or scope.startswith("🌐"):
-        sel += list(EGYPT[ARAB_EG_GROUP])
-    if scope.startswith("🌐"):
-        seen = {e[1] for e in sel}
-        sel += [e for gg in (ARABIC, ISRAEL, USA, UK) for ents in gg.values() for e in ents if e[1] not in seen]
-    sel += [(x["label"], x["domain"], x["lang"]) for x in S()["sources"] if x["group"] in ("eg", "egt")]
-    st.caption(f"عدد المصادر اللي هيدور فيها: {len(sel)}")
-    if st.button("🔎 تتبّع الموضوع", type="primary", use_container_width=True, key="egt_go"):
+    days = c3.select_slider("الفترة (أيام)", options=[1, 2, 3, 7, 14, 30, 60], value=3 if not egp else 7, key=f"{pk}_days")
+    if egp:
+        scopes = ["🇪🇬 المصادر المصرية بس", "🇪🇬 + القنوات العربية (تغطيتها لمصر)", "🌐 كل حاجة (مصرية وعربية وإسرائيلية وأمريكية وبريطانية)"]
+    else:
+        scopes = ["🌍 كل مصادر المنطقة والعالم (إسرائيلية وأمريكية وبريطانية وتركيا وإيران وإثيوبيا وعربية)", "🇺🇸🇬🇧 الأمريكية والبريطانية بس", "🌐 كل ده + المصرية"]
+    scope = c4.radio("هدور فين؟", scopes, key=f"{pk}_scope")
+    if egp:
+        sel = [e for g, ents in EGYPT.items() if g != ARAB_EG_GROUP for e in ents]
+        if scope.startswith("🇪🇬 +") or scope.startswith("🌐"):
+            sel += list(EGYPT[ARAB_EG_GROUP])
+        if scope.startswith("🌐"):
+            seen = {e[1] for e in sel}
+            sel += [e for gg in (ARABIC, ISRAEL, USA, UK) for ents in gg.values() for e in ents if e[1] not in seen]
+        gcode, gn_c = "EG", "EG"
+    else:
+        groups_ = (USA, UK) if scope.startswith("🇺🇸") else (ISRAEL, USA, UK, REGION, ARABIC)
+        sel = [e for gg in groups_ for ents in gg.values() for e in ents]
+        if scope.startswith("🌐"):
+            sel += [e for g, ents in EGYPT.items() if g != ARAB_EG_GROUP for e in ents]
+        seen_d, uniq = set(), []
+        for e in sel:
+            if e[1] not in seen_d:
+                seen_d.add(e[1])
+                uniq.append(e)
+        sel, gcode, gn_c = uniq, None, "US"
+    sel += [(x["label"], x["domain"], x["lang"]) for x in S()["sources"] if x["group"] in (("eg", "egt") if egp else ("il", "us", "uk", "rg", "trend"))]
+    st.caption(f"عدد المصادر اللي هيدور فيها: {len(sel)}" + ("" if egp else " (ممكن ياخد كام دقيقة)"))
+    if st.button("🔎 تتبّع الموضوع", type="primary", use_container_width=True, key=f"{pk}_go"):
         if not topic.strip():
             st.warning("اكتب الموضوع الأول.")
         else:
@@ -2675,22 +2720,22 @@ def render_topic_track():
                 seed, gnotes = [], []
                 with st.spinner("جارٍ جلب نتائج أخبار Google أولاً…"):
                     try:
-                        seed, gnotes = gn_seed(sel, "EG", terms)
+                        seed, gnotes = gn_seed(sel, gn_c, terms)
                     except Exception as ex:
                         gnotes = [f"Google News تعذّر: {type(ex).__name__}"]
-                do_search("egt", core.jobs_for_sources(sel, "EG"), sel, terms=terms, seed=seed)
-                if gnotes and st.session_state.get("res_egt"):
-                    st.session_state["res_egt"]["used"] += gnotes
+                do_search(rk, core.jobs_for_sources(sel, gcode), sel, terms=terms, seed=seed)
+                if gnotes and st.session_state.get(f"res_{rk}"):
+                    st.session_state[f"res_{rk}"]["used"] += gnotes
                 try:
-                    direct_title_hits("egt", sel, terms)
+                    direct_title_hits(rk, sel, terms)
                 except Exception as ex:
                     st.caption(f"تعذّر البحث المباشر في الخلاصات: {type(ex).__name__}")
             finally:
                 g_.update(keep)
-            res_ = st.session_state.get("res_egt")
+            res_ = st.session_state.get(f"res_{rk}")
             if res_ is not None:
                 res_.update(topic=topic.strip(), alts=alts.strip(), days=days, created=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    res = st.session_state.get("res_egt") or {}
+    res = st.session_state.get(f"res_{rk}") or {}
     if not res.get("topic"):
         return
     st.markdown(f"#### 📌 {res['topic']}" + (f" — خلال آخر {res.get('days', '?')} يوم" if res.get("days") else ""))
@@ -2698,69 +2743,53 @@ def render_topic_track():
     items = [dossiers_mod.from_app_item(a, lab, source_country, "تتبّع موضوع") for a in res.get("items") or []
              if isinstance(a, dict) and a.get("url") and (a.get("title") or a.get("title_ar"))]
     words = [res["topic"]] + [t.strip() for t in TERM_SPLIT.split(res.get("alts", "")) if t.strip()]
-    if st.checkbox("💬 ضمّ منشوراتي (فيس/تويتر) اللي فيها كلمات الموضوع", value=True, key="egt_posts"):
+    if st.checkbox("💬 ضمّ منشوراتي (فيس/تويتر) اللي فيها كلمات الموضوع", value=True, key=f"{pk}_posts"):
         pats = [dossiers_mod.make_pattern([w]) for w in words]
         for p_ in S().get("posts", []):
-            if any(pt is not None and pt.search(dossiers_mod.normalize(p_.get("text", ""))) for pt in pats):
+            if (p_.get("scope") or "pol") == P and any(pt is not None and pt.search(dossiers_mod.normalize(p_.get("text", ""))) for pt in pats):
                 items.append(dossiers_mod.from_post(p_))
     if not items:
         st.info("مفيش نتائج للموضوع ده في الفترة دي. جرّب كلمات بديلة أو فترة أطول أو مصادر أكتر.")
     else:
         r = dossiers_mod.run(items, [], 3, 2, res.get("days"), topic=res["topic"])
         if r["dossiers"]:
-            _dos_group(r["dossiers"][0], "الموضوع", "egt")
+            _dos_group(r["dossiers"][0], "الموضوع", pk)
         if r["threads"]:
             st.markdown(f"**🧵 الخيوط اللي طلعت جوا الموضوع ({r['n_threads']})**")
             labels = [f"{n}. {t['name']} — {len(t['items'])} عنصر · {t['first']} → {t['last']}" for n, t in enumerate(r["threads"][:8], 1)]
-            pick = st.selectbox("اختار خيط تشوفه", labels, key="egt_thread")
+            pick = st.selectbox("اختار خيط تشوفه", labels, key=f"{pk}_thread")
             n = labels.index(pick) + 1
-            _dos_group(r["threads"][n - 1], "الخيط", f"egt_t{n}")
-    if st.toggle("📄 اعرض كروت نتائج البحث (الأصل والترجمة)", key="egt_cards"):
-        render_results("egt")
-
-
-
-EG_PRESETS = {
-    "🚨 جرائم وحوادث": "جريمة، مقتل، القبض على، النيابة العامة، حادث",
-    "⚖️ قوانين وقرارات": "قانون، مجلس النواب، قرار جمهوري، الجريدة الرسمية، تعديل تشريعي",
-    "💰 اقتصاد وأسعار": "الدولار، الجنيه، التضخم، الأسعار، الدعم، البنك المركزي",
-    "🇸🇩 الحدود مع السودان": "السودان، الحدود، لاجئين، أرقين، حلايب",
-    "🇵🇸 غزة ورفح": "غزة، رفح، معبر رفح، فلسطين، المساعدات",
-    "💍 مجتمع وأحوال شخصية": "زواج، طلاق، أسرة، قضية رأي عام",
-    "🏥 صحة وتعليم": "المستشفيات، التأمين الصحي، الثانوية العامة، الجامعات، التعليم",
-    "⛽ خدمات وطاقة": "الكهرباء، انقطاع الكهرباء، الوقود، البنزين، المياه",
-}
-
-with tab_eg:
-    use_filters("eg", "full")
-    st.caption("أخبار الشأن الداخلي المصري من صحف ومواقع مصرية بس: جرائم وحوادث، ومجتمع، واقتصاد وأسعار، وقوانين وقرارات، والحدود، والخدمات. "
-               "اختار موضوع جاهز تحت أو اكتب كلماتك في الخانة فوق. وللشرح (القانون ده بيعمل إيه ولزمته إيه) روح تاب «🧵 الملفات والخيوط» واختار «📜 شرح للمواطن».")
-    pre = st.multiselect("🎯 مواضيع جاهزة (بتدور على كلماتها كلها)", list(EG_PRESETS), key="eg_pre")
-    if pre:
-        if query.strip():
-            st.caption("كلماتك اللي فوق هي اللي بتتستخدم (المواضيع الجاهزة بتشتغل لما الخانة تبقى فاضية).")
+            _dos_group(r["threads"][n - 1], "الخيط", f"{pk}_t{n}")
+    st.markdown("**💾 خلّيه ملف دائم**")
+    st.caption("بيتحفظ في «📁 الملفات» بتاعتك، وأي خبر جديد فيه الكلمات دي (من أي بحث بتعمله بعد كده) يدخله لوحده.")
+    d1, d2, d3 = st.columns([3, 3, 1])
+    fname = d1.text_input("اسم الملف", value=res["topic"][:60], key=f"{pk}_fname")
+    fwords = d2.text_input("كلمات الملف (بفاصلة، كلمة واحدة منهم تكفي)", value="، ".join(w for w in words[1:]) or res["topic"], key=f"{pk}_fwords")
+    fkind = d3.radio("النوع", ["ملف", "ترند"], key=f"{pk}_fkind")
+    if st.button("💾 احفظه ملف دائم", key=f"{pk}_save"):
+        ws = [w.strip() for w in re.split(r"[,،]", fwords) if w.strip()]
+        if fname.strip() and ws:
+            _dos_save_cfg(dossiers_mod.add_dossier(_dos_cfg_text(P), fname.strip(), ws, fkind), P)
+            st.success(f"✅ اتحفظ ملف «{fname.strip()}». روح «🔗 اربط واعرض» عشان يظهر في الملفات.")
         else:
-            query = "، ".join(EG_PRESETS[p] for p in pre)
-            joiner = "OR"
-            st.caption(f"هيدور على: {query}")
-    eg_view = st.radio("عايز إيه؟", ["🔎 تتبّع موضوع كامل (أسعار الطماطم، جريمة معينة…) من كل المصادر", "📰 بحث عادي في المصادر"], key="eg_view")
-    if eg_view.startswith("🔎"):
-        render_topic_track()
-    else:
-        curated_tab("eg", EGYPT, "EG", "EG", "ابحث في المصادر المصرية")
+            st.warning("اكتب اسم الملف وكلمة واحدة على الأقل.")
+    if st.toggle("📄 اعرض كروت نتائج البحث (الأصل والترجمة)", key=f"{pk}_cards"):
+        render_results(rk)
 
 
-def render_dossiers_cfg():
+def render_dossiers_cfg(P="pol"):
+    sx = PROFS[P]["sx"]
+    egp = P == "eg"
     with st.expander("⚙️ الملفات اللي بيدور عليها (تقدر تضيف وتعدل)"):
-        txt = _dos_cfg_text()
+        txt = _dos_cfg_text(P)
         dos, err = dossiers_mod.parse_config(txt)
         if dos:
             st.markdown("**الملفات الحالية:** " + "، ".join(("🇺🇸 " if d["lens"] else "📈 " if d["type"] == "ترند" else "📁 ") + d["name"] for d in dos))
-        if st.button("🆕 ضيف الملفات الجاهزة الجديدة (غزة وفلسطين، رفح، حدود السودان، اقتصاد مصر، قوانين، جرائم...)", key="dos_merge_btn", use_container_width=True):
+        if st.button(("🆕 ضيف الملفات الجاهزة للشأن المصري (السيسي 2030، الإخوان، الاقتصاد والأسعار، قوانين، جرائم...)" if egp else "🆕 ضيف الملفات الجاهزة الجديدة (غزة وفلسطين، رفح، حدود السودان، اقتصاد مصر، قوانين، جرائم...)"), key=f"dos_merge_btn{sx}", use_container_width=True):
             try:
-                new_txt, added = dossiers_mod.merge_defaults(txt)
+                new_txt, added = dossiers_mod.merge_defaults(txt, egypt=egp)
                 if added:
-                    _dos_save_cfg(new_txt)
+                    _dos_save_cfg(new_txt, P)
                     st.session_state["dos_msg"] = "✅ اتضاف: " + "، ".join(added) + ". دوس «اربط» عشان تظهر."
                 else:
                     st.session_state["dos_msg"] = "كل الملفات الجاهزة موجودة عندك بالفعل."
@@ -2769,36 +2798,36 @@ def render_dossiers_cfg():
                 st.error(f"مقدرتش أضيف ({type(ex).__name__}).")
         st.markdown("**➕ ملف أو ترند جديد بسرعة**")
         c1, c2 = st.columns(2)
-        nm = c1.text_input("اسم الملف (مثال: ترند الطماطم في تونس)", key="dos_new_name")
-        kind = c2.radio("النوع", ["ملف", "ترند"], horizontal=True, key="dos_new_kind")
-        g1 = st.text_input("كلمات المجموعة الأولى مفصولة بفاصلة (مثال: طماطم، tomato)", key="dos_new_g1")
-        g2 = st.text_input("كلمات مجموعة تانية لازم تتذكر معاها (اختياري، مثال: تونس، tunisia)", key="dos_new_g2")
-        if st.button("➕ ضيف الملف", key="dos_new_btn"):
+        nm = c1.text_input("اسم الملف (مثال: ترند الطماطم في تونس)", key=f"dos_new_name{sx}")
+        kind = c2.radio("النوع", ["ملف", "ترند"], horizontal=True, key=f"dos_new_kind{sx}")
+        g1 = st.text_input("كلمات المجموعة الأولى مفصولة بفاصلة (مثال: طماطم، tomato)", key=f"dos_new_g1{sx}")
+        g2 = st.text_input("كلمات مجموعة تانية لازم تتذكر معاها (اختياري، مثال: تونس، tunisia)", key=f"dos_new_g2{sx}")
+        if st.button("➕ ضيف الملف", key=f"dos_new_btn{sx}"):
             groups = [[w.strip() for w in re.split(r"[,،]", g) if w.strip()] for g in (g1, g2)]
             groups = [g for g in groups if g]
             if nm.strip() and groups:
                 raw = json.loads(txt)
                 raw.append({"name": nm.strip(), "type": kind, "all_of": groups})
-                _dos_save_cfg(json.dumps(raw, ensure_ascii=False, indent=1))
+                _dos_save_cfg(json.dumps(raw, ensure_ascii=False, indent=1), P)
                 st.session_state["dos_msg"] = f"✅ اتضاف ملف «{nm.strip()}». دوس «اربط» عشان يظهر."
                 st.rerun()
             else:
                 st.warning("اكتب اسم الملف وكلمة واحدة على الأقل.")
         if IS_ADMIN:
             st.markdown("**تعديل متقدم (JSON)**: كل ملف ليه اسم، ونوع، و all_of = مجموعات كلمات، والخبر لازم يلمس كلمة من كل مجموعة.")
-            new = st.text_area("تعريف الملفات", value=txt, height=300, key="dos_cfg_edit")
+            new = st.text_area("تعريف الملفات", value=txt, height=300, key=f"dos_cfg_edit{sx}")
             c1, c2 = st.columns(2)
-            if c1.button("💾 احفظ التعديل", key="dos_cfg_save"):
+            if c1.button("💾 احفظ التعديل", key=f"dos_cfg_save{sx}"):
                 ok, e2 = dossiers_mod.parse_config(new)
                 if ok:
-                    _dos_save_cfg(new)
+                    _dos_save_cfg(new, P)
                     st.session_state["dos_msg"] = "✅ اتحفظت الملفات."
                     st.rerun()
                 else:
                     st.error(f"فيه غلطة في الكتابة: {e2}")
-            if c2.button("↩️ رجّع الملفات الأصلية", key="dos_cfg_reset"):
-                _dos_save_cfg(dossiers_mod.default_config_text())
-                st.session_state.pop("dos_cfg_edit", None)
+            if c2.button("↩️ رجّع الملفات الأصلية", key=f"dos_cfg_reset{sx}"):
+                _dos_save_cfg((dossiers_mod.egypt_config_text() if egp else dossiers_mod.default_config_text()), P)
+                st.session_state.pop(f"dos_cfg_edit{sx}", None)
                 st.rerun()
         if err:
             st.error(f"تعريف الملفات فيه مشكلة: {err}")
@@ -2916,70 +2945,84 @@ def render_search_all():
             st.rerun()
 
 
-def render_dossiers():
+def render_dossiers(P="pol"):
     ss = st.session_state
-    st.caption("بيجمع الأخبار اللي عندك في ملفات (مواضيع ثابتة) وخيوط (قصص بتتكون لوحدها من الأخبار اللي فيها نفس الأطراف في أيام قريبة). "
-               "عدّ وربط بس من غير ذكاء اصطناعي، فمش بيصرف رصيد. والتحليل بيتعمل بالبرومبت الجاهز لأهم الملفات.")
+    sx, egp = PROFS[P]["sx"], P == "eg"
+    if egp:
+        st.caption("ملفات وخيوط الشأن المصري **لوحدها**: بتاخد بس نتايج تاب «الشأن المصري» وتتبّع المواضيع، ومبتتخلطش بسياسة المنطقة. "
+                   "فيها ملفات جاهزة (نهاية حكم السيسي 2030 ومن بعده، الإخوان، الاقتصاد والأسعار…) وتقدر تعمل ملف جديد على أي موضوع أو ترند. "
+                   "دوس «اربط» وهتطلعلك الملفات والخيوط، وجوه كل ملف برومبت تحليل.")
+    else:
+        st.caption("بيجمع الأخبار اللي عندك في ملفات (مواضيع ثابتة) وخيوط (قصص بتتكون لوحدها من الأخبار اللي فيها نفس الأطراف في أيام قريبة). "
+                   "عدّ وربط بس من غير ذكاء اصطناعي، فمش بيصرف رصيد. والتحليل بيتعمل بالبرومبت الجاهز لأهم الملفات.")
     if ss.get("dos_msg"):
         st.success(ss.pop("dos_msg"))
-    with st.expander("📖 ازاي تستخدم التبويب ده؟ (خطوة بخطوة)", expanded=_dos_result() is None):
-        st.markdown(DOS_HELP)
-    render_search_all()
-    pool = _dos_pool()
-    tabs_n = Counter(a.get("tab", "") for a in pool.values())
-    st.markdown(f"🔎 **أرشيف البحث:** {len(pool)} خبر من بحثك في التابات (آخر 21 يوم)"
+    if not egp:
+        with st.expander("📖 ازاي تستخدم التبويب ده؟ (خطوة بخطوة)", expanded=_dos_result(P) is None):
+            st.markdown(DOS_HELP)
+        render_search_all()
+    pool = {a["url"]: a for a in _pool_for(P)}
+    tabs_n = Counter(t_ for a in pool.values() for t_ in (a.get("tabs") or [a.get("tab", "")]) if (t_ in EG_TABS) == egp)
+    st.markdown(f"🔎 **أرشيف البحث" + (" (الشأن المصري)" if egp else " (السياسة والمنطقة)") + f":** {len(pool)} خبر (آخر 21 يوم)"
                 + (f" — منهم {', '.join(f'{TAB_LABELS.get(k, k)} ({n})' for k, n in tabs_n.most_common(6))}" if pool else
+                   " — لسه مفيش. أي بحث تعمله في تاب الشأن المصري أو تتبّع موضوع هيتسجل هنا لوحده." if egp else
                    " — لسه مفيش. أي بحث تعمله في أي تاب هيتسجل هنا لوحده."))
-    if pool and st.button("🗑️ امسح أرشيف البحث", key="dos_pool_clear"):
-        ss["dos_pool"] = {}
+    if pool and st.button("🗑️ امسح أرشيف البحث ده", key=f"dos_pool_clear{sx}"):
+        gone = set(pool)
+        ss["dos_pool"] = {u: a for u, a in _dos_pool().items() if u not in gone}
         if PERSIST:
             try:
-                store.save_file(GH_TOKEN, GH_GIST, DOS_POOL_FILE, {})
+                store.save_file(GH_TOKEN, GH_GIST, DOS_POOL_FILE, ss["dos_pool"])
             except Exception:
                 pass
         st.rerun()
     with st.expander("💬 منشورات فيس وتويتر (الخلاط التحليلي)", expanded=False):
-        render_posts()
-    render_dossiers_cfg()
+        render_posts(P)
+    render_dossiers_cfg(P)
+    if not egp:
+        if st.toggle("🔎 ترند أو موضوع طارئ (وقف الطيران، عطل مايكروسوفت…)؟ تتبّعه من كل المصادر واعمله ملف", key="trd_open"):
+            render_topic_track("pol")
 
     st.markdown("### 🔗 اربط الأخبار")
     opts = {"بحث": "نتايج البحث اللي في التابات", "يومي": "التقرير اليومي (آخر 7 أيام)", "مخصص": "التقرير المخصص",
             "محفوظات": "المحفوظات", "أمريكا": "تحركات أمريكا وتصريحات ترامب (ملف جاهز بالروابط)"}
-    use = st.multiselect("هات الأخبار منين؟", list(opts), default=list(opts), format_func=lambda k: opts[k], key="dos_use")
+    if egp:
+        opts = {"بحث": "نتايج البحث بتاعة الشأن المصري (التاب وتتبّع المواضيع)"}
+    use = st.multiselect("هات الأخبار منين؟", list(opts), default=list(opts), format_func=lambda k: opts[k], key=f"dos_use{sx}")
     ups = st.file_uploader("ملفات أخبار إضافية CSV (اختياري) — الأعمدة: date, source, country, title, url, summary",
-                           type=["csv"], accept_multiple_files=True, key="dos_up")
+                           type=["csv"], accept_multiple_files=True, key=f"dos_up{sx}")
     DAYS_OPTS = {"آخر 6 ساعات": 0.25, "آخر 12 ساعة": 0.5, "آخر 24 ساعة": 1, "آخر يومين": 2, "آخر 3 أيام": 3, "آخر 5 أيام": 5,
                  "آخر 7 أيام": 7, "آخر 14 يوم": 14, "آخر 30 يوم": 30}
-    dl = st.select_slider("📅 الأخبار بتاعة أنهي فترة؟ (أي حاجة أقدم من كده بتتشال)", options=list(DAYS_OPTS), value="آخر 7 أيام", key="dos_days2")
+    dl = st.select_slider("📅 الأخبار بتاعة أنهي فترة؟ (أي حاجة أقدم من كده بتتشال)", options=list(DAYS_OPTS), value="آخر 7 أيام", key=f"dos_days2{sx}")
     max_days = DAYS_OPTS[dl]
     st.caption("💡 اقتراح: **6 أو 12 ساعة** لو بتتابع حدث ساخن لسه حاصل. **24 ساعة أو 3 أيام** لقصة شغالة. **7 أيام** للصورة العامة (الافتراضي). **14 أو 30 يوم** للخلفية بس. "
                "الأخبار اللي مفيهاش ساعة (زي ملف أمريكا والمنشورات) بتتحسب باليوم.")
-    lk = st.radio("🔗 لما أدوس على عنوان خبر يفتح إيه؟", ["🌐 الصفحة الأصلية (للتصوير والمرجع)", "📖 صفحة الترجمة"], horizontal=True, key="dos_link_r")
+    lk = st.radio("🔗 لما أدوس على عنوان خبر يفتح إيه؟", ["🌐 الصفحة الأصلية (للتصوير والمرجع)", "📖 صفحة الترجمة"], horizontal=True, key=f"dos_link_r{sx}")
     st.session_state["dos_link"] = "tr" if lk.startswith("📖") else "orig"
     st.caption("وجنب كل خبر لينك صغير تاني للتاني، فتقدر تفتح الاتنين.")
     c1, c2 = st.columns(2)
-    window = c1.slider("أقصى فرق بالأيام بين خبرين في نفس الخيط", 1, 7, 3, key="dos_win")
-    mins = c2.slider("أقل عدد أطراف مشتركة (زي مصر + إثيوبيا = 2)", 1, 3, 2, key="dos_min")
-    if st.button("🔗 اربط واعرض الملفات والخيوط", type="primary", use_container_width=True, key="dos_run"):
-        dos, err = dossiers_mod.parse_config(_dos_cfg_text())
+    window = c1.slider("أقصى فرق بالأيام بين خبرين في نفس الخيط", 1, 7, 3, key=f"dos_win{sx}")
+    mins = c2.slider("أقل عدد أطراف مشتركة (زي مصر + إثيوبيا = 2)", 1, 3, 2, key=f"dos_min{sx}")
+    if st.button("🔗 اربط واعرض الملفات والخيوط", type="primary", use_container_width=True, key=f"dos_run{sx}"):
+        dos, err = dossiers_mod.parse_config(_dos_cfg_text(P))
         if err:
             st.error(f"تعريف الملفات فيه مشكلة: {err}")
         else:
             with st.spinner("⏳ بيجمع ويربط…"):
-                items, counts = _dos_collect(use, ups)
+                items, counts = _dos_collect(use, ups, P)
                 if not items:
                     st.warning("مفيش أخبار. اعمل بحث في أي تاب، أو استنى التقرير اليومي، أو ضيف منشورات.")
                 else:
                     res = dossiers_mod.run(items, dos, window, mins, max_days)
                     res["counts"] = counts
-                    ss["dos_res"] = res
+                    ss[PROFS[P]["res_key"]] = res
                     if PERSIST:
                         try:
-                            store.save_file(GH_TOKEN, GH_GIST, DOS_RES_FILE, res)
+                            store.save_file(GH_TOKEN, GH_GIST, PROFS[P]["res_file"], res)
                         except Exception as e:
                             st.caption(f"النتيجة ما اتحفظتش في التخزين الدائم ({type(e).__name__})")
 
-    res = _dos_result()
+    res = _dos_result(P)
     if not res:
         st.info("دوس «اربط» عشان يطلعلك الملفات والخيوط. النتيجة بتفضل محفوظة لحد ما تربط تاني.")
         return
@@ -3004,24 +3047,24 @@ def render_dossiers():
     for col, (lbl, val) in zip(m, [("عنصر", res["total"]), ("ملف فيه أخبار", len(res["dossiers"])),
                                    ("خيط", res["n_threads"]), ("منشور", res["posts"])]):
         col.markdown(f"<div class='hm-stat'><b>{val}</b>{lbl}</div>", unsafe_allow_html=True)
-    view = st.radio("اعرض", ["📁 الملفات", "🧵 خيوط القصص", "💡 اقتراحات ملفات جديدة"], horizontal=True, key="dos_view")
+    view = st.radio("اعرض", ["📁 الملفات", "🧵 خيوط القصص", "💡 اقتراحات ملفات جديدة"], horizontal=True, key=f"dos_view{sx}")
     if view.startswith("📁"):
         names = [g["name"] for g in res["dossiers"]]
-        pick = st.selectbox("اختار ملف", ["الكل"] + names, key="dos_pick")
+        pick = st.selectbox("اختار ملف", ["الكل"] + names, key=f"dos_pick{sx}")
         for g in res["dossiers"]:
             if pick != "الكل" and g["name"] != pick:
                 continue
             ico = "🇺🇸" if g.get("lens") else "📈" if g["type"] == "ترند" else "📁"
             us_n = len(g.get("us_items") or [])
             with st.expander(f"{ico} {g['name']} — {len(g['items'])} عنصر" + (f" · 🇺🇸 {us_n}" if us_n else ""), expanded=pick != "الكل"):
-                _dos_group(g, "الملف", f"d{names.index(g['name'])}")
+                _dos_group(g, "الملف", f"{sx}d{names.index(g['name'])}")
         if not res["dossiers"]:
             st.info("مفيش ولا خبر دخل أي ملف. جرّب تجيب أخبار أكتر أو ضيف كلمات للملفات.")
     elif view.startswith("🧵"):
         st.caption("الخيط = أخبار فيها نفس الأطراف في أيام قريبة. مرتبة من الأهم (أخبار ومصادر وتصريحات أكتر).")
         for n, t in enumerate(res["threads"], 1):
             with st.expander(f"{n}. {t['name']} — {len(t['items'])} عنصر · الملف: {t['dossier']}"):
-                _dos_group(t, "الخيط", f"t{n}")
+                _dos_group(t, "الخيط", f"{sx}t{n}")
         if not res["threads"]:
             st.info("مفيش خيوط. جرّب تكبّر عدد الأيام أو تقلل الأطراف المشتركة لـ 1.")
     else:
@@ -3029,15 +3072,47 @@ def render_dossiers():
         for i, sgg in enumerate(res["suggested_words"]):
             c1, c2 = st.columns([4, 1])
             c1.markdown(f"**{sgg['word']}** — في {sgg['news']} خبر و{sgg['posts']} منشور")
-            if c2.button("➕ اعمله ملف", key=f"dos_sg_{i}"):
-                _dos_save_cfg(dossiers_mod.add_dossier(_dos_cfg_text(), f"مقترح: {sgg['word']}", [sgg["word"]]))
+            if c2.button("➕ اعمله ملف", key=f"dos_sg{sx}_{i}"):
+                _dos_save_cfg(dossiers_mod.add_dossier(_dos_cfg_text(P), f"مقترح: {sgg['word']}", [sgg["word"]]), P)
                 ss["dos_msg"] = f"✅ اتعمل ملف «{sgg['word']}». دوس «اربط» تاني عشان يتملى."
                 st.rerun()
         if res.get("suggested_entities"):
             st.markdown("**أطراف بتظهر كتير من غير ملف:** " + "، ".join(f"{e['entity']} ({e['count']})" for e in res["suggested_entities"]))
         if not res["suggested_words"]:
             st.info("مفيش كلمات متكررة كفاية.")
-    st.download_button("⬇️ نزّل التقرير كامل (ملف نصي)", dossiers_mod.briefing_md(res), file_name="dossiers_report.md", key="dos_dl")
+    st.download_button("⬇️ نزّل التقرير كامل (ملف نصي)", dossiers_mod.briefing_md(res), file_name="dossiers_report.md", key=f"dos_dl{sx}")
+
+
+EG_PRESETS = {
+    "🚨 جرائم وحوادث": "جريمة، مقتل، القبض على، النيابة العامة، حادث",
+    "⚖️ قوانين وقرارات": "قانون، مجلس النواب، قرار جمهوري، الجريدة الرسمية، تعديل تشريعي",
+    "💰 اقتصاد وأسعار": "الدولار، الجنيه، التضخم، الأسعار، الدعم، البنك المركزي",
+    "🇸🇩 الحدود مع السودان": "السودان، الحدود، لاجئين، أرقين، حلايب",
+    "🇵🇸 غزة ورفح": "غزة، رفح، معبر رفح، فلسطين، المساعدات",
+    "💍 مجتمع وأحوال شخصية": "زواج، طلاق، أسرة، قضية رأي عام",
+    "🏥 صحة وتعليم": "المستشفيات، التأمين الصحي، الثانوية العامة، الجامعات، التعليم",
+    "⛽ خدمات وطاقة": "الكهرباء، انقطاع الكهرباء، الوقود، البنزين، المياه",
+}
+
+with tab_eg:
+    use_filters("eg", "full")
+    st.caption("أخبار الشأن الداخلي المصري من صحف ومواقع مصرية بس: جرائم وحوادث، ومجتمع، واقتصاد وأسعار، وقوانين وقرارات، والحدود، والخدمات. "
+               "اختار موضوع جاهز تحت أو اكتب كلماتك في الخانة فوق. وللشرح (القانون ده بيعمل إيه ولزمته إيه) روح تاب «🧵 الملفات والخيوط» واختار «📜 شرح للمواطن».")
+    pre = st.multiselect("🎯 مواضيع جاهزة (بتدور على كلماتها كلها)", list(EG_PRESETS), key="eg_pre")
+    if pre:
+        if query.strip():
+            st.caption("كلماتك اللي فوق هي اللي بتتستخدم (المواضيع الجاهزة بتشتغل لما الخانة تبقى فاضية).")
+        else:
+            query = "، ".join(EG_PRESETS[p] for p in pre)
+            joiner = "OR"
+            st.caption(f"هيدور على: {query}")
+    eg_view = st.radio("عايز إيه؟", ["🔎 تتبّع موضوع كامل (أسعار الطماطم، جريمة معينة…) من كل المصادر", "📰 بحث عادي في المصادر", "🧵 ملفات وخيوط الشأن المصري (منفصلة عن السياسة)"], key="eg_view")
+    if eg_view.startswith("🔎"):
+        render_topic_track("eg")
+    elif eg_view.startswith("🧵"):
+        render_dossiers("eg")
+    else:
+        curated_tab("eg", EGYPT, "EG", "EG", "ابحث في المصادر المصرية")
 
 
 with tab_dr:
