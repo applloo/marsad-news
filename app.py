@@ -2393,6 +2393,7 @@ def render_watch():
 
 # ───────── 🧵 الملفات والخيوط: ربط كل الأخبار في ملفات وخيوط + منشورات فيس وتويتر + برومبت تحليل جاهز ─────────
 DOS_RES_FILE, DOS_CFG_FILE = "marsad_dossiers.json", "marsad_dossiers_cfg.json"
+TOPIC_CFG, TOPIC_STATUS = "marsad_topic_cfg.json", "marsad_topic_job.json"
 EG_TABS = {"eg", "egt"}  # تابات الشأن المصري: نتايجها بتروح لربط الشأن المصري بس، ومبتتخلطش بالسياسة الإقليمية
 PROFS = {"pol": {"sx": "", "cfg_file": DOS_CFG_FILE, "res_file": DOS_RES_FILE, "cfg_key": "dos_cfg", "res_key": "dos_res"},
          "eg": {"sx": "_eg", "cfg_file": "marsad_dossiers_eg_cfg.json", "res_file": "marsad_dossiers_eg.json", "cfg_key": "dos_cfg_eg", "res_key": "dos_res_eg"}}
@@ -2706,7 +2707,61 @@ def render_topic_track(P="eg"):
         sel, gcode, gn_c = uniq, None, "US"
     sel += [(x["label"], x["domain"], x["lang"]) for x in S()["sources"] if x["group"] in (("eg", "egt") if egp else ("il", "us", "uk", "rg", "trend"))]
     st.caption(f"عدد المصادر اللي هيدور فيها: {len(sel)}" + ("" if egp else " (ممكن ياخد كام دقيقة)"))
-    if st.button("🔎 تتبّع الموضوع", type="primary", use_container_width=True, key=f"{pk}_go"):
+    tok_ = _sec("ACTIONS_TOKEN")
+    gh_ok = bool(tok_ and GH_GIST and GH_TOKEN)
+    runmode = st.radio("التشغيل", ["🚀 على GitHub (تقدر تقفل التطبيق وترجع بعدين)", "⚡ هنا في التطبيق دلوقتي (لازم تفضل فاتحه)"],
+                       index=0 if gh_ok else 1, horizontal=True, key=f"{pk}_runmode")
+    on_gh = runmode.startswith("🚀")
+    if on_gh:
+        if not gh_ok:
+            st.warning("التشغيل على GitHub محتاج ACTIONS_TOKEN في Secrets (نفس اللي عملناه للبحث الشامل) واتأكد إنك رفعت ملف topic.yml.")
+        else:
+            ss_ = st.session_state
+            repo_, branch_ = _sec("GH_REPO") or gh_actions.DEFAULT_REPO, _sec("GH_BRANCH") or "main"
+            t0_, lr_ = ss_.get(f"{pk}_lr", (0, None))
+            if time.time() - t0_ > 45:
+                try:
+                    lr_ = gh_actions.last_run(tok_, repo_, "topic.yml")
+                except Exception as ex:
+                    lr_ = None
+                    st.caption(f"تعذّر قراءة حالة التشغيل ({type(ex).__name__}). اتأكد إنك رفعت ملف topic.yml.")
+                ss_[f"{pk}_lr"] = (time.time(), lr_)
+            busy_ = bool(lr_ and lr_["status"] in ("queued", "in_progress", "waiting", "requested"))
+            try:
+                tst = store.load_file(GH_TOKEN, GH_GIST, TOPIC_STATUS, {}) or {}
+            except Exception:
+                tst = {}
+            if lr_:
+                ico_ = {"success": "✅ خلص", "failure": "❌ فشل", "cancelled": "⚪ اتلغى"}.get(lr_["conclusion"] or "", "⏳ شغال دلوقتي" if busy_ else "—")
+                st.markdown(f"آخر تشغيل على GitHub: **{ico_}** · [التفاصيل]({lr_['url']})")
+            if tst.get("topic"):
+                st.caption(f"آخر موضوع اتبعت: «{tst['topic']}» · الحالة: {tst.get('state', '')}" + (f" · {tst.get('count', 0)} نتيجة" if tst.get("count") is not None else "")
+                           + (f" · {tst.get('error', '')[:100]}" if tst.get("error") else ""))
+            b1_, b2_ = st.columns(2)
+            if b1_.button("🚀 ابعت التتبّع لـ GitHub", type="primary", disabled=busy_, use_container_width=True, key=f"{pk}_ghgo"):
+                if not topic.strip():
+                    st.warning("اكتب الموضوع الأول.")
+                else:
+                    code_ = (["local", "arab", "all"] if egp else ["world", "us_uk", "plus_eg"])[scopes.index(scope)]
+                    try:
+                        store.save_file(GH_TOKEN, GH_GIST, TOPIC_CFG, {"topic": topic.strip(), "alts": alts.strip(), "days": days, "scope": code_, "profile": P})
+                        ok_, msg_ = gh_actions.dispatch(tok_, repo_, branch_, "topic.yml")
+                        if ok_:
+                            time.sleep(3)
+                            ss_.pop(f"{pk}_lr", None)
+                            st.success(f"✅ اتبعت لـ GitHub الساعة {datetime.now(core.TZ).strftime('%H:%M')}. " + msg_ + " ولما يخلص دوس «حدّث وحمّل النتيجة».")
+                        else:
+                            st.error(msg_)
+                    except Exception as ex:
+                        st.error(f"مقدرتش أبدأ ({type(ex).__name__}).")
+            if b2_.button("🔄 حدّث وحمّل النتيجة", use_container_width=True, key=f"{pk}_ghref"):
+                ss_.pop(f"{pk}_lr", None)
+                try:
+                    n_ = reload_results()
+                    st.success(f"✅ اتحمّل آخر نتايج محفوظة ({n_} قسم). النتيجة تحت.")
+                except Exception as ex:
+                    st.error(f"تعذّر التحميل ({type(ex).__name__}).")
+    if (not on_gh) and st.button("🔎 تتبّع الموضوع", type="primary", use_container_width=True, key=f"{pk}_go"):
         if not topic.strip():
             st.warning("اكتب الموضوع الأول.")
         else:
