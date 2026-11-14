@@ -145,7 +145,38 @@ ARABIC = {
         ("الشرق", "asharq.com", "ar"),
     ],
 }
-EGYPT_ARABIC = {"ahram.org.eg", "almasryalyoum.com", "youm7.com", "shorouknews.com", "elwatannews.com", "madamasr.com"}
+# ───────── الشأن المصري: مصادر مصرية فقط (حوادث ومجتمع واقتصاد وقوانين وحدود) ─────────
+EGYPT = {
+    "📰 صحف ومواقع إخبارية مصرية": [
+        ("القاهرة 24", "cairo24.com", "ar"),
+        ("اليوم السابع", "youm7.com", "ar"),
+        ("المصري اليوم", "almasryalyoum.com", "ar"),
+        ("الأهرام", "ahram.org.eg", "ar"),
+        ("الشروق", "shorouknews.com", "ar"),
+        ("الوطن", "elwatannews.com", "ar"),
+        ("مصراوي", "masrawy.com", "ar"),
+        ("صدى البلد", "elbalad.news", "ar"),
+        ("الدستور", "dostor.org", "ar"),
+        ("الفجر", "elfagr.org", "ar"),
+        ("البوابة نيوز", "albawabhnews.com", "ar"),
+        ("أخبار اليوم", "akhbarelyom.com", "ar"),
+        ("الجمهورية", "gomhuriaonline.com", "ar"),
+        ("الوفد", "alwafd.news", "ar"),
+        ("المنصة", "almanassa.com", "ar"),
+        ("مدى مصر", "madamasr.com", "ar"),
+    ],
+    "💰 اقتصاد وأعمال": [
+        ("أموال الغد", "amwalalghad.com", "ar"),
+        ("البورصة", "alborsaanews.com", "ar"),
+        ("المال", "almalnews.com", "ar"),
+    ],
+    "🏛️ رسمي وحكومي": [
+        ("رئاسة الجمهورية", "presidency.eg", "ar"),
+        ("الهيئة العامة للاستعلامات", "sis.gov.eg", "ar"),
+    ],
+}
+EGYPT_ARABIC = {"ahram.org.eg", "almasryalyoum.com", "youm7.com", "shorouknews.com", "elwatannews.com", "madamasr.com"} | {
+    d for g in EGYPT.values() for _l, d, _lg in g}
 
 # ───────── القرن الأفريقي وتركيا وإيران (لغات: am أمهري، tr تركي، fa فارسي، en إنجليزي؛ يجوز الجمع "tr,en") ─────────
 REGION = {
@@ -238,6 +269,9 @@ for _title, _ents in REGION.items():
 for _ents in ARABIC.values():
     for _n, _d, _l in _ents:
         _DOM_COUNTRY.setdefault(_d, "مصر" if _d in EGYPT_ARABIC else "")
+for _ents in EGYPT.values():
+    for _n, _d, _l in _ents:
+        _DOM_COUNTRY[_d] = "مصر"
 
 
 def source_country(domain):

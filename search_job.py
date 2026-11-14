@@ -13,15 +13,15 @@ from datetime import datetime, timedelta, timezone
 import core
 import store
 import writers as writers_mod
-from sources import ARABIC, ISRAEL, REGION, UK, USA, source_country
+from sources import ARABIC, EGYPT, ISRAEL, REGION, UK, USA, source_country
 from writers import WRITERS
 
 CFG, STATUS, RES = "marsad_search_cfg.json", "marsad_search_job.json", "marsad_results.json"
 # القسم: (المصادر، رمز بلد GDELT، رمز بلد أخبار Google)
-SCOPES = {"il": (ISRAEL, "IS", "IL"), "us": (USA, "US", "US"), "uk": (UK, "UK", "UK"), "rg": (REGION, None, "US")}
+SCOPES = {"il": (ISRAEL, "IS", "IL"), "us": (USA, "US", "US"), "uk": (UK, "UK", "UK"), "rg": (REGION, None, "US"), "eg": (EGYPT, "EG", "EG")}
 WR_GROUPS = {"wr": ["US", "UK", "IL"], "wa": ["SA", "GCC", "EG", "AR"]}
 LABELS = {}
-for _g in (ISRAEL, USA, UK, REGION, ARABIC):
+for _g in (ISRAEL, USA, UK, REGION, ARABIC, EGYPT):
     for _entries in _g.values():
         for _label, _doms, _ in _entries:
             for _d in _doms.split("|"):

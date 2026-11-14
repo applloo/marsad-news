@@ -26,11 +26,11 @@ import keys as keys_mod
 import store
 import time
 import writers as writers_mod
-from sources import ARABIC, EGYPT_ARABIC, FLAGS, ISRAEL, REGION, SECTIONS, UK, USA, source_country
+from sources import ARABIC, EGYPT, EGYPT_ARABIC, FLAGS, ISRAEL, REGION, SECTIONS, UK, USA, source_country
 from writers import WRITERS
 
 DOMAIN_LABELS = {}
-for _g in (ISRAEL, USA, UK, REGION, ARABIC):
+for _g in (ISRAEL, USA, UK, REGION, ARABIC, EGYPT):
     for _entries in _g.values():
         for _label, _doms, _ in _entries:
             for _d in _doms.split("|"):
@@ -827,7 +827,7 @@ if not IS_ADMIN:
 
 def render_about():
     """قسم «ما هذا التطبيق؟»: يُبنى من بيانات التطبيق نفسها فيتحدّث تلقائياً"""
-    n_src = len({d for g in (ISRAEL, USA, UK, REGION, ARABIC) for ents in g.values() for _, d, _ in ents})
+    n_src = len({d for g in (ISRAEL, USA, UK, REGION, ARABIC, EGYPT) for ents in g.values() for _, d, _ in ents})
     stats = {"n_sources": n_src, "langs": [core.LANG_NAME_AR.get(c, c) for c, _, _, _ in core.LANGS],
              "n_writers": len(WRITERS), "n_files": len(intel.FILES), "file_names": list(intel.FILES), "threads": list(links_mod.THREADS)}
     with st.expander(about_plain("ما هذا التطبيق؟ وايه اللي بيعمله؟")):
@@ -1000,7 +1000,7 @@ query, match, joiner, ctype = "", core.MATCH_MODES[0], "AND", "الكل"
 start_utc, end_utc, max_rec, verify, hide_nomatch = _now0 - timedelta(days=7), _now0, 30, True, False
 
 home_box = st.container()
-tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_br, tab_in, tab_gd, tab_dos, tab_sv, tab_ms = st.tabs(TAB_NAMES)
+tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_eg, tab_br, tab_in, tab_gd, tab_dos, tab_sv, tab_ms = st.tabs(TAB_NAMES)
 
 
 def use_filters(p, level="full"):
@@ -1047,7 +1047,7 @@ def use_filters(p, level="full"):
 
 
 def pick_sources(key, groups, allow_custom=True):
-    custom_lang = "en" if key == "rg" else "both"
+    custom_lang = "en" if key == "rg" else ("ar" if key == "eg" else "both")
     """يعرض اختيار المصادر ويعيد قائمة (label, domains, lang)"""
     chosen = []
     extra_src = [(x["label"], x["domain"], x["lang"]) for x in S()["sources"] if x["group"] == key]
@@ -1469,7 +1469,7 @@ def style_tabs():
     components.html("""
 <script>
 (function(){
-  var COL=["#c0392b","#2563c9","#d9822b","#2a8f55"];
+  var COL=["#c0392b","#2563c9","#d9822b","#2a8f55","#8a5a00"];
   function paint(){
     try{
       var doc=window.parent.document;
@@ -1482,7 +1482,7 @@ def style_tabs():
         t.style.setProperty('min-height','48px','important');
         t.style.setProperty('border','1px solid rgba(128,128,128,.4)','important');
         t.style.setProperty('margin','3px','important');
-        if(i>=3&&i<=6){
+        if(i>=3&&i<=7){
           t.style.setProperty('background',COL[i-3],'important');
           t.style.setProperty('color','#fff','important');
           t.style.setProperty('font-weight','700','important');
@@ -1623,6 +1623,31 @@ with tab_rg:
     st.caption("إثيوبيا (سد النهضة والقرن الأفريقي) وتركيا (شرق المتوسط) وإيران (اليمن والخليج). يُترجم بحثك تلقائياً إلى الأمهرية "
                "أو التركية أو الفارسية أو الإنجليزية بحسب لغة كل مصدر. اختر مصدراً واحداً أو عدة مصادر أو كلها، أو ابحث داخل مصدر واحد.")
     curated_tab("rg", REGION, None, "US", "ابحث في مصادر تركيا وإيران وإثيوبيا")
+
+EG_PRESETS = {
+    "🚨 جرائم وحوادث": "جريمة، مقتل، القبض على، النيابة العامة، حادث",
+    "⚖️ قوانين وقرارات": "قانون، مجلس النواب، قرار جمهوري، الجريدة الرسمية، تعديل تشريعي",
+    "💰 اقتصاد وأسعار": "الدولار، الجنيه، التضخم، الأسعار، الدعم، البنك المركزي",
+    "🇸🇩 الحدود مع السودان": "السودان، الحدود، لاجئين، أرقين، حلايب",
+    "🇵🇸 غزة ورفح": "غزة، رفح، معبر رفح، فلسطين، المساعدات",
+    "💍 مجتمع وأحوال شخصية": "زواج، طلاق، أسرة، قضية رأي عام",
+    "🏥 صحة وتعليم": "المستشفيات، التأمين الصحي، الثانوية العامة، الجامعات، التعليم",
+    "⛽ خدمات وطاقة": "الكهرباء، انقطاع الكهرباء، الوقود، البنزين، المياه",
+}
+
+with tab_eg:
+    use_filters("eg", "full")
+    st.caption("أخبار الشأن الداخلي المصري من صحف ومواقع مصرية بس: جرائم وحوادث، ومجتمع، واقتصاد وأسعار، وقوانين وقرارات، والحدود، والخدمات. "
+               "اختار موضوع جاهز تحت أو اكتب كلماتك في الخانة فوق. وللشرح (القانون ده بيعمل إيه ولزمته إيه) روح تاب «🧵 الملفات والخيوط» واختار «📜 شرح للمواطن».")
+    pre = st.multiselect("🎯 مواضيع جاهزة (بتدور على كلماتها كلها)", list(EG_PRESETS), key="eg_pre")
+    if pre:
+        if query.strip():
+            st.caption("كلماتك اللي فوق هي اللي بتتستخدم (المواضيع الجاهزة بتشتغل لما الخانة تبقى فاضية).")
+        else:
+            query = "، ".join(EG_PRESETS[p] for p in pre)
+            joiner = "OR"
+            st.caption(f"هيدور على: {query}")
+    curated_tab("eg", EGYPT, "EG", "EG", "ابحث في المصادر المصرية")
 
 DAY_OPTS = {"آخر 24 ساعة": 1, "آخر 3 أيام": 3, "آخر 7 أيام": 7, "آخر 14 يوماً": 14, "آخر 30 يوماً": 30}
 
@@ -2391,7 +2416,7 @@ def render_watch():
 
 # ───────── 🧵 الملفات والخيوط: ربط كل الأخبار في ملفات وخيوط + منشورات فيس وتويتر + برومبت تحليل جاهز ─────────
 DOS_RES_FILE, DOS_CFG_FILE = "marsad_dossiers.json", "marsad_dossiers_cfg.json"
-TAB_LABELS = {"il": "الإسرائيلية", "us": "الأمريكية", "uk": "البريطانية", "rg": "تركيا وإيران وإثيوبيا", "ml": "ترجمة ثم بحث",
+TAB_LABELS = {"il": "الإسرائيلية", "us": "الأمريكية", "uk": "البريطانية", "rg": "تركيا وإيران وإثيوبيا", "eg": "الشأن المصري", "ml": "ترجمة ثم بحث",
               "wr": "الكتّاب", "gd": "GDELT", "br": "تصفّح مصدر", "in": "مكتب الاستخبارات",
               "in_all": "مكتب الاستخبارات", "home": "البحث السريع"}
 DOS_HELP = """
@@ -2414,7 +2439,7 @@ DOS_HELP = """
 
 **4️⃣ اختار ملف** من «📁 الملفات» (زي «الحرب الأمريكية الإيرانية»). جوه كل ملف: العناصر، والزاوية الأمريكية، و«🤖 برومبت التحليل».
 
-**5️⃣ في «🤖 برومبت التحليل»:** اختار «🎬 اسكريبت فيديو» وحدد المدة، ودوس علامة النسخ، والصقه في شات Claude. هيرجعلك اسكريبت طويل بعامية قاهرية: هوك قاتل في أول 5 ثواني، وأفيهات سودا، وفكّ للمشهد وربط أمريكا وإيران وإسرائيل واليمن ومصر والسعودية ببعض، وأسئلة للمتابع كل نص دقيقة. ولو عايز تحليل مكتوب بس اختار «🧠 تحليل بس».
+**5️⃣ في «🤖 برومبت التحليل»:** اختار «🎬 اسكريبت 1» أو «اسكريبت 2» أو «🧭 اسكريبت 3» اللي بيطلّع قراءتك للمشهد (جرّب وشوف الأحسن) وحدد المدة، ودوس علامة النسخ، والصقه في شات Claude. هيرجعلك اسكريبت طويل بعامية قاهرية: هوك قاتل في أول 5 ثواني، وأفيهات سودا، وفكّ للمشهد وربط أمريكا وإيران وإسرائيل واليمن ومصر والسعودية ببعض، وأسئلة للمتابع كل نص دقيقة. ولو عايز تحليل مكتوب بس اختار «🧠 تحليل بس».
 
 **نصيحة:** ابعت ملف واحد في المرة عشان التحليل يطلع مركز. ولو عايز كل حاجة، نزّل «⬇️ التقرير كامل» من تحت خالص.
 """
@@ -2580,10 +2605,21 @@ def _dos_group(g, scope, key):
             st.markdown("\n".join(_dos_item_md(it) for it in us[-15:]))
     with tabs[-1]:
         st.caption("فيه المبادئ كلها: الدوافع، التبعات، الأحداث، الترابط، التصريحات ونتيجتها، قصد كل جريدة، وجهة نظر تانية، والحبكة.")
-        kind = st.radio("عايز إيه؟", ["🎬 اسكريبت فيديو (عامية قاهرية، هوك وأفيهات وربط)", "🧠 تحليل بس"], horizontal=True, key=f"dos_pk_{key}")
+        kind = st.radio("عايز إيه؟", ["🎬 اسكريبت 1 (عامية قاهرية، هوك وأفيهات وربط)", "🎬 اسكريبت 2 (نفس الروح + جدول وقايع وقواعد دقة)", "🧭 اسكريبت 3 (قراءة المشهد من وجهة نظرك)", "📜 شرح للمواطن (قانون / قرار / اقتصاد / جريمة)", "🧠 تحليل بس"], horizontal=True, key=f"dos_pk_{key}")
+        egy = True
+        if not (kind.startswith("🧠") or kind.startswith("📜")):
+            egy = st.checkbox("🇪🇬 اكتب من منظور مصري وعربي (القضية الفلسطينية مركزية، والمقياس هو مصلحتنا)", value=True, key=f"dos_egy_{key}")
         if kind.startswith("🎬"):
             mins = st.select_slider("مدة الفيديو (دقايق)", options=[3, 5, 8, 10, 15, 20], value=8, key=f"dos_pm_{key}")
-            txt = dossiers_mod.script_prompt(scope, g, mins)
+            txt = dossiers_mod.script_prompt2(scope, g, mins, egypt=egy) if kind.startswith("🎬 اسكريبت 2") else dossiers_mod.script_prompt(scope, g, mins, egypt=egy)
+        elif kind.startswith("🧭"):
+            mins = st.select_slider("مدة الفيديو (دقايق)", options=[3, 5, 8, 10, 15, 20], value=8, key=f"dos_pm3_{key}")
+            view = st.text_area("رأيك المبدئي في الموضوع (اختياري، جملة أو اتنين)", key=f"dos_view_{key}", height=90,
+                                placeholder="مثال: أنا شايف إن ترامب بيستعد لضربة تقيلة بس مستني اللحظة المناسبة اقتصادياً")
+            st.caption("لو كتبت رأيك، الذكاء الاصطناعي هيبني عليه لو الأدلة بتسنده، ولو بتعاكسه هيقولك بصراحة. ولو سيبتها فاضية هيطلّع هو أقوى قراءة من الأخبار.")
+            txt = dossiers_mod.script_prompt3(scope, g, mins, view, egypt=egy)
+        elif kind.startswith("📜"):
+            txt = dossiers_mod.explain_prompt(scope, g)
         else:
             txt = dossiers_mod.prompt_for(scope, g)
         st.info("📋 دوس علامة النسخ اللي فوق على الشمال في المربع الرمادي، وبعدين الصقه في شات Claude.")
@@ -2629,6 +2665,17 @@ def render_dossiers_cfg():
         dos, err = dossiers_mod.parse_config(txt)
         if dos:
             st.markdown("**الملفات الحالية:** " + "، ".join(("🇺🇸 " if d["lens"] else "📈 " if d["type"] == "ترند" else "📁 ") + d["name"] for d in dos))
+        if st.button("🆕 ضيف الملفات الجاهزة الجديدة (غزة وفلسطين، رفح، حدود السودان، اقتصاد مصر، قوانين، جرائم...)", key="dos_merge_btn", use_container_width=True):
+            try:
+                new_txt, added = dossiers_mod.merge_defaults(txt)
+                if added:
+                    _dos_save_cfg(new_txt)
+                    st.session_state["dos_msg"] = "✅ اتضاف: " + "، ".join(added) + ". دوس «اربط» عشان تظهر."
+                else:
+                    st.session_state["dos_msg"] = "كل الملفات الجاهزة موجودة عندك بالفعل."
+                st.rerun()
+            except Exception as ex:
+                st.error(f"مقدرتش أضيف ({type(ex).__name__}).")
         st.markdown("**➕ ملف أو ترند جديد بسرعة**")
         c1, c2 = st.columns(2)
         nm = c1.text_input("اسم الملف (مثال: ترند الطماطم في تونس)", key="dos_new_name")
@@ -2668,7 +2715,7 @@ def render_dossiers_cfg():
 
 SEARCH_CFG, SEARCH_STATUS = "marsad_search_cfg.json", "marsad_search_job.json"
 SEARCH_SCOPES = {"il": "🇮🇱 المصادر الإسرائيلية", "us": "🇺🇸 المصادر الأمريكية", "uk": "🇬🇧 المصادر البريطانية",
-                 "rg": "🌍 تركيا وإيران وإثيوبيا", "wr": "✍️ الكتّاب الأجانب", "wa": "🇸🇦 الكتّاب العرب"}
+                 "rg": "🌍 تركيا وإيران وإثيوبيا", "eg": "🇪🇬 الشأن المصري", "wr": "✍️ الكتّاب الأجانب", "wa": "🇸🇦 الكتّاب العرب"}
 PERIOD_OPTS = {"آخر 12 ساعة": 0.5, "آخر 24 ساعة": 1, "آخر يومين": 2, "آخر 3 أيام": 3, "آخر 5 أيام": 5, "آخر 7 أيام": 7}
 
 
