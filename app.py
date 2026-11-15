@@ -129,10 +129,44 @@ def tts_cached(text, voice, rate):
     return core.tts(text, voice, rate)
 
 
+_fragment = getattr(st, "fragment", lambda f: f)  # الجزء ده بيتحدّث لوحده من غير ما يعيد تحميل باقي التابات
+
+
+def pick(container, label, options, default, key, fmt=None):
+    """بديل لشريط السحب: الشريط كان بيتحرك لوحده مع الطلوع والنزول على الموبايل فيعمل تحديث للصفحة. هنا اختيارات بتتداس بس"""
+    options = list(options)
+    if default not in options:
+        try:
+            default = min(options, key=lambda o: abs(o - default))
+        except Exception:
+            default = options[0]
+    kw = {"format_func": fmt} if fmt else {}
+    if len(options) <= 6:
+        return container.radio(label, options, index=options.index(default), horizontal=True, key=key, **kw)
+    return container.selectbox(label, options, index=options.index(default), key=key, **kw)
+
+
+def untranslated(items):
+    return [x for x in items if isinstance(x, dict) and (x.get("title") or "").strip()
+            and not core._HAS_AR.search(x.get("title_ar") or "") and not core._HAS_AR.search(x.get("title") or "")]
+
+
+def fix_untranslated(items, limit=40):
+    """بيترجم العناوين اللي فضلت بلغتها (لما الترجمة كانت واقعة وقت البحث). بيرجع عدد اللي اتصلح"""
+    bad = untranslated(items)[:limit]
+    if not bad:
+        return 0
+    try:
+        core.translate_titles(bad)
+    except Exception:
+        return 0
+    return sum(1 for x in bad if core._HAS_AR.search(x.get("title_ar") or ""))
+
+
 def tts_settings(prefix):
     c1, c2 = st.columns(2)
     label = c1.selectbox("الصوت", list(core.VOICES), key=f"{prefix}_voice")
-    rate = c2.slider("السرعة", -30, 40, 0, step=5, format="%d%%", key=f"{prefix}_rate")
+    rate = pick(c2, "السرعة", range(-30, 45, 5), 0, f"{prefix}_rate", fmt=lambda v: f"{v:+d}%")
     return core.VOICES[label], rate
 
 
@@ -1024,10 +1058,10 @@ def use_filters(p, level="full"):
             mode = st.radio("النطاق الزمني", ["آخر ساعات", "آخر أيام", "تواريخ محددة"], horizontal=True, key=f"{p}_mode")
             now_utc = datetime.now(timezone.utc)
             if mode == "آخر ساعات":
-                h = st.slider("عدد الساعات", 1, 72, 24, key=f"{p}_h")
+                h = pick(st, "عدد الساعات", [1, 2, 3, 6, 12, 24, 36, 48, 72], 24, f"{p}_h")
                 g["start_utc"], g["end_utc"] = now_utc - timedelta(hours=h), now_utc
             elif mode == "آخر أيام":
-                d = st.slider("عدد الأيام", 1, 90, 7, key=f"{p}_d")
+                d = pick(st, "عدد الأيام", [1, 2, 3, 5, 7, 10, 14, 21, 30, 45, 60, 90], 7, f"{p}_d")
                 g["start_utc"], g["end_utc"] = now_utc - timedelta(days=d), now_utc
             else:
                 today = datetime.now(core.TZ).date()
@@ -1038,7 +1072,7 @@ def use_filters(p, level="full"):
                     s = e = rng[0] if isinstance(rng, (list, tuple)) else rng
                 g["start_utc"] = datetime(s.year, s.month, s.day, tzinfo=core.TZ).astimezone(timezone.utc)
                 g["end_utc"] = datetime(e.year, e.month, e.day, 23, 59, 59, tzinfo=core.TZ).astimezone(timezone.utc)
-            g["max_rec"] = st.slider("عدد النتائج الأقصى", 10, 100, 30, step=10, key=f"{p}_max")
+            g["max_rec"] = pick(st, "عدد النتائج الأقصى", range(10, 110, 10), 30, f"{p}_max")
             g["verify"] = st.checkbox("🔍 افحص نص كل مقال واعرض جملة ذُكرت فيها كلمتك (أبطأ)", value=True, key=f"{p}_ver")
             g["hide_nomatch"] = st.checkbox("🚫 أخفِ المقالات التي لا تظهر كلمتك في نصها (موصى به)", value=True, key=f"{p}_hide",
                                             help="أخبار جوجل وGDELT أحياناً يرجّعوا مقالات الكلمة فيها بعيدة عن العنوان او مش موجودة. الفحص بيقرا نص المقال ويشيل اللي مفيهوش كلمتك.")
@@ -1219,10 +1253,24 @@ def render_results(key):
     if not data["items"]:
         st.info("لا نتائج ضمن هذه الفلاتر. جرّب «كل الكلمات (AND)» أو وسّع النطاق الزمني أو زِد المصادر.")
     view_items = data["items"]
+    if (view_items and not data.get("tr_retry") and time.time() > st.session_state.get("tr_down_until", 0)
+            and untranslated(view_items[:20])):  # مرة واحدة لكل نتيجة: ترجم اللي فضل بلغته في أول صفحة
+        data["tr_retry"] = True
+        with st.spinner("جارٍ ترجمة العناوين اللي لسه مش مترجمة…"):
+            if not fix_untranslated(view_items[:20], limit=20):
+                st.session_state["tr_down_until"] = time.time() + 180  # خدمة الترجمة واقعة: ماتعطلش باقي التابات
+    left_tr = len(untranslated(view_items))
+    if left_tr:
+        if st.button(f"🔁 ترجم العناوين اللي لسه مش مترجمة ({left_tr})", key=f"trfix_{key}"):
+            with st.spinner("جارٍ الترجمة…"):
+                n_fx = fix_untranslated(view_items, limit=80)
+            st.caption(f"اتترجم {n_fx} عنوان." if n_fx else "خدمة الترجمة مش بترد دلوقتي. جرّب تاني بعد دقيقة.")
     if any(x.get("mcount") for x in view_items):
         if st.checkbox("🔢 رتّب حسب عدد مرات ذكر كلمتك (الأكثر ذكراً أولاً)", value=False, key=f"msort_{key}"):
             view_items = sorted(view_items, key=lambda x: (x.get("mcount") or 0), reverse=True)
-    for i, a in enumerate(view_items):
+    n_show = int(st.session_state.get(f"more_{key}", 20))
+    total_items = len(view_items)
+    for i, a in enumerate(view_items[:n_show]):
         url = a.get("url", "")
         with st.container(border=True):
             st.markdown(card_html(a), unsafe_allow_html=True)
@@ -1248,6 +1296,11 @@ def render_results(key):
                 st.caption("✅ محفوظ — تجده في تاب «المحفوظات»")
             else:
                 st.button("💾 حفظ للقراءة لاحقاً", key=f"save_{key}_{i}", on_click=save_item, args=(a, key))
+    if total_items > n_show:
+        st.caption(f"معروض {n_show} من {total_items} نتيجة (بنعرضهم على دفعات عشان الصفحة تفضل خفيفة).")
+        if st.button(f"⬇️ اعرض 20 كمان (باقي {total_items - n_show})", key=f"morebtn_{key}", use_container_width=True):
+            st.session_state[f"more_{key}"] = n_show + 20
+            st.rerun()
 
 
 def all_entries(key, groups):
@@ -1431,7 +1484,7 @@ def curated_tab(key, groups, gd_country, gn_country, btn_label):
         with_terms = only_conf = False
         use_gn = st.checkbox("➕ ضمّ نتائج أخبار Google إلى GDELT (يغطي ما يفوته GDELT)", value=True, key=f"{key}_gn")
         use_body = st.checkbox("🔬 ابحث كمان داخل نص المقالات (يقرا أحدث مقالات المصدر ويدوّر فيها؛ أبطأ بس بيلقط اللي كلمتك في وسطه)", value=False, key=f"{key}_body")
-        body_n = st.slider("عدد المقالات اللي هتتقرا", 20, 120, 60, 10, key=f"{key}_bn") if use_body else 0
+        body_n = pick(st, "عدد المقالات اللي هتتقرا", range(20, 130, 10), 60, f"{key}_bn") if use_body else 0
     if st.button(btn_label, type="primary", use_container_width=True, key=f"go_{key}"):
         terms = [t.strip() for t in TERM_SPLIT.split(query) if t.strip()]
         if author_raw.strip():
@@ -1565,7 +1618,7 @@ def render_home():
     q = st.text_input("🔎 ابحث في كل الاقسام مرة واحدة", key="home_q", placeholder="مثال: سد النهضة، مصر السعودية، سيناء")
     c1, c2, c3 = st.columns([3, 2, 2])
     keys = c1.multiselect("الاقسام", list(HOME_SECTIONS), default=list(HOME_SECTIONS), format_func=lambda k: HOME_SECTIONS[k][0], key="home_secs")
-    days = c2.select_slider("الفترة (ايام)", options=[1, 2, 3, 5, 7, 14, 30], value=3, key="home_days")
+    days = pick(c2, "الفترة (ايام)", [1, 2, 3, 5, 7, 14, 30], 3, "home_days")
     jl = c3.radio("لو اكتر من كلمة", ["اي منها", "كلها"], key="home_join")
     use_gd = st.checkbox("🌐 ضم GDELT (ادق وابطأ)", value=False, key="home_gd",
                          help="بيضيف نتايج GDELT لكل قسم. اتأخر من 3 لـ 8 دقايق. استخدمه للمواضيع المهمة.")
@@ -2285,9 +2338,9 @@ def render_watch():
             txt = st.text_area("المواضيع (سطر لكل موضوع. + يعني الكلمتين مع بعض، | يعني بدائل، # تعليق)", height=280, key="watch_txt",
                                value=cfg.get("topics") or watch_mod.DEFAULT_TOPICS)
             c1, c2, c3 = st.columns(3)
-            wdays = c1.select_slider("الفترة (ايام)", options=[1, 2, 3, 4], value=int(cfg.get("days") or 2), key="watch_days")
-            per = c2.slider("اخبار لكل موضوع", 3, 20, int(cfg.get("per") or 10), key="watch_per")
-            deep = c3.slider("اقرا وترجم اول كام خبر", 0, 10, int(cfg["deep"]) if cfg.get("deep") is not None else 5, key="watch_deep")
+            wdays = pick(c1, "الفترة (ايام)", [1, 2, 3, 4], int(cfg.get("days") or 2), "watch_days")
+            per = pick(c2, "اخبار لكل موضوع", range(3, 21), int(cfg.get("per") or 10), "watch_per")
+            deep = pick(c3, "اقرا وترجم اول كام خبر", range(0, 11), int(cfg["deep"]) if cfg.get("deep") is not None else 5, "watch_deep")
             keys_sel = st.multiselect("ادور في ايه؟", list(WATCH_SCOPES), default=[k for k in (cfg.get("scopes") or list(WATCH_SCOPES)) if k in WATCH_SCOPES],
                                       format_func=lambda k: WATCH_SCOPES[k], key="watch_scopes")
         if not tok:
@@ -2617,13 +2670,13 @@ def _dos_group(g, scope, key):
         if not (kind.startswith("🧠") or kind.startswith("📜") or kind.startswith("🔎") or kind.startswith("🇪🇬")):
             egy = st.checkbox("🇪🇬 اكتب من منظور مصري وعربي (القضية الفلسطينية مركزية، والمقياس هو مصلحتنا)", value=not eg_mode_, key=f"dos_egy_{key}")
         if kind.startswith("🇪🇬"):
-            mins = st.select_slider("مدة الفيديو (دقايق)", options=[3, 5, 8, 10, 15, 20], value=8, key=f"dos_pme_{key}")
+            mins = pick(st, "مدة الفيديو (دقايق)", [3, 5, 8, 10, 15, 20], 8, f"dos_pme_{key}")
             txt = dossiers_mod.eg_script_prompt(g, mins)
         elif kind.startswith("🎬"):
-            mins = st.select_slider("مدة الفيديو (دقايق)", options=[3, 5, 8, 10, 15, 20], value=8, key=f"dos_pm_{key}")
+            mins = pick(st, "مدة الفيديو (دقايق)", [3, 5, 8, 10, 15, 20], 8, f"dos_pm_{key}")
             txt = dossiers_mod.script_prompt2(scope, g, mins, egypt=egy) if kind.startswith("🎬 اسكريبت 2") else dossiers_mod.script_prompt(scope, g, mins, egypt=egy)
         elif kind.startswith("🧭"):
-            mins = st.select_slider("مدة الفيديو (دقايق)", options=[3, 5, 8, 10, 15, 20], value=8, key=f"dos_pm3_{key}")
+            mins = pick(st, "مدة الفيديو (دقايق)", [3, 5, 8, 10, 15, 20], 8, f"dos_pm3_{key}")
             view = st.text_area("رأيك المبدئي في الموضوع (اختياري، جملة أو اتنين)", key=f"dos_view_{key}", height=90,
                                 placeholder="مثال: أنا شايف إن ترامب بيستعد لضربة تقيلة بس مستني اللحظة المناسبة اقتصادياً")
             st.caption("لو كتبت رأيك، الذكاء الاصطناعي هيبني عليه لو الأدلة بتسنده، ولو بتعاكسه هيقولك بصراحة. ولو سيبتها فاضية هيطلّع هو أقوى قراءة من الأخبار.")
@@ -2673,6 +2726,7 @@ def render_posts(P="pol"):
                     st.rerun()
 
 
+@_fragment
 def render_topic_track(P="eg"):
     """تتبّع موضوع أو ترند: بيدور عليه في المصادر، يجمّع الأخبار في ملف واحد وخيوط، ويطلّعلك برومبت تحليل. P = "eg" للشأن المصري، "pol" للسياسة والمنطقة"""
     egp = P == "eg"
@@ -2686,7 +2740,7 @@ def render_topic_track(P="eg"):
     topic = c1.text_input("🎯 الموضوع", key=f"{pk}_topic", placeholder="ارتفاع أسعار الطماطم في الأسواق" if egp else "وقف الطيران الأمريكي بين الولايات")
     alts = c2.text_input("كلمات بديلة (بفاصلة)", key=f"{pk}_alts", placeholder="سعر الطماطم، الطماطم، أسعار الخضار" if egp else "ground stop، FAA، تأخير الرحلات، مطارات أمريكا")
     c3, c4 = st.columns(2)
-    days = c3.select_slider("الفترة (أيام)", options=[1, 2, 3, 7, 14, 30, 60], value=3 if not egp else 7, key=f"{pk}_days")
+    days = pick(c3, "الفترة (أيام)", [1, 2, 3, 7, 14, 30, 60], 3 if not egp else 7, f"{pk}_days")
     if egp:
         scopes = ["🇪🇬 المصادر المصرية بس", "🇪🇬 + القنوات العربية (تغطيتها لمصر)", "🌐 كل حاجة (مصرية وعربية وإسرائيلية وأمريكية وبريطانية)"]
     else:
@@ -2733,10 +2787,13 @@ def render_topic_track(P="eg"):
                     st.caption(f"تعذّر قراءة حالة التشغيل ({type(ex).__name__}). اتأكد إنك رفعت ملف topic.yml.")
                 ss_[f"{pk}_lr"] = (time.time(), lr_)
             busy_ = bool(lr_ and lr_["status"] in ("queued", "in_progress", "waiting", "requested"))
-            try:
-                tst = store.load_file(GH_TOKEN, GH_GIST, TOPIC_STATUS, {}) or {}
-            except Exception:
-                tst = {}
+            t1_, tst = ss_.get(f"{pk}_tst", (0, {}))
+            if time.time() - t1_ > 60:
+                try:
+                    tst = store.load_file(GH_TOKEN, GH_GIST, TOPIC_STATUS, {}) or {}
+                except Exception:
+                    tst = {}
+                ss_[f"{pk}_tst"] = (time.time(), tst)
             if lr_:
                 ico_ = {"success": "✅ خلص", "failure": "❌ فشل", "cancelled": "⚪ اتلغى"}.get(lr_["conclusion"] or "", "⏳ شغال دلوقتي" if busy_ else "—")
                 st.markdown(f"آخر تشغيل على GitHub: **{ico_}** · [التفاصيل]({lr_['url']})")
@@ -2755,6 +2812,7 @@ def render_topic_track(P="eg"):
                         if ok_:
                             time.sleep(3)
                             ss_.pop(f"{pk}_lr", None)
+                            ss_.pop(f"{pk}_tst", None)
                             st.success(f"✅ اتبعت لـ GitHub الساعة {datetime.now(core.TZ).strftime('%H:%M')}. " + msg_ + " ولما يخلص دوس «حدّث وحمّل النتيجة».")
                         else:
                             st.error(msg_)
@@ -2762,6 +2820,7 @@ def render_topic_track(P="eg"):
                         st.error(f"مقدرتش أبدأ ({type(ex).__name__}).")
             if b2_.button("🔄 حدّث وحمّل النتيجة", use_container_width=True, key=f"{pk}_ghref"):
                 ss_.pop(f"{pk}_lr", None)
+                ss_.pop(f"{pk}_tst", None)
                 try:
                     n_ = reload_results()
                     st.success(f"✅ اتحمّل آخر نتايج محفوظة ({n_} قسم). النتيجة تحت.")
@@ -2818,8 +2877,8 @@ def render_topic_track(P="eg"):
         if r["threads"]:
             st.markdown(f"**🧵 الخيوط اللي طلعت جوا الموضوع ({r['n_threads']})**")
             labels = [f"{n}. {t['name']} — {len(t['items'])} عنصر · {t['first']} → {t['last']}" for n, t in enumerate(r["threads"][:8], 1)]
-            pick = st.selectbox("اختار خيط تشوفه", labels, key=f"{pk}_thread")
-            n = labels.index(pick) + 1
+            pick_thr = st.selectbox("اختار خيط تشوفه", labels, key=f"{pk}_thread")
+            n = labels.index(pick_thr) + 1
             _dos_group(r["threads"][n - 1], "الخيط", f"{pk}_t{n}")
     st.markdown("**💾 خلّيه ملف دائم**")
     st.caption("بيتحفظ في «📁 الملفات» بتاعتك، وأي خبر جديد فيه الكلمات دي (من أي بحث بتعمله بعد كده) يدخله لوحده.")
@@ -3006,6 +3065,7 @@ def render_search_all():
             st.rerun()
 
 
+@_fragment
 def render_dossiers(P="pol"):
     ss = st.session_state
     sx, egp = PROFS[P]["sx"], P == "eg"
@@ -3054,7 +3114,7 @@ def render_dossiers(P="pol"):
                            type=["csv"], accept_multiple_files=True, key=f"dos_up{sx}")
     DAYS_OPTS = {"آخر 6 ساعات": 0.25, "آخر 12 ساعة": 0.5, "آخر 24 ساعة": 1, "آخر يومين": 2, "آخر 3 أيام": 3, "آخر 5 أيام": 5,
                  "آخر 7 أيام": 7, "آخر 14 يوم": 14, "آخر 30 يوم": 30}
-    dl = st.select_slider("📅 الأخبار بتاعة أنهي فترة؟ (أي حاجة أقدم من كده بتتشال)", options=list(DAYS_OPTS), value="آخر 7 أيام", key=f"dos_days2{sx}")
+    dl = pick(st, "📅 الأخبار بتاعة أنهي فترة؟ (أي حاجة أقدم من كده بتتشال)", list(DAYS_OPTS), "آخر 7 أيام", f"dos_days2{sx}")
     max_days = DAYS_OPTS[dl]
     st.caption("💡 اقتراح: **6 أو 12 ساعة** لو بتتابع حدث ساخن لسه حاصل. **24 ساعة أو 3 أيام** لقصة شغالة. **7 أيام** للصورة العامة (الافتراضي). **14 أو 30 يوم** للخلفية بس. "
                "الأخبار اللي مفيهاش ساعة (زي ملف أمريكا والمنشورات) بتتحسب باليوم.")
@@ -3062,8 +3122,8 @@ def render_dossiers(P="pol"):
     st.session_state["dos_link"] = "tr" if lk.startswith("📖") else "orig"
     st.caption("وجنب كل خبر لينك صغير تاني للتاني، فتقدر تفتح الاتنين.")
     c1, c2 = st.columns(2)
-    window = c1.slider("أقصى فرق بالأيام بين خبرين في نفس الخيط", 1, 7, 3, key=f"dos_win{sx}")
-    mins = c2.slider("أقل عدد أطراف مشتركة (زي مصر + إثيوبيا = 2)", 1, 3, 2, key=f"dos_min{sx}")
+    window = pick(c1, "أقصى فرق بالأيام بين خبرين في نفس الخيط", range(1, 8), 3, f"dos_win{sx}")
+    mins = pick(c2, "أقل عدد أطراف مشتركة (زي مصر + إثيوبيا = 2)", [1, 2, 3], 2, f"dos_min{sx}")
     if st.button("🔗 اربط واعرض الملفات والخيوط", type="primary", use_container_width=True, key=f"dos_run{sx}"):
         dos, err = dossiers_mod.parse_config(_dos_cfg_text(P))
         if err:
@@ -3111,21 +3171,23 @@ def render_dossiers(P="pol"):
     view = st.radio("اعرض", ["📁 الملفات", "🧵 خيوط القصص", "💡 اقتراحات ملفات جديدة"], horizontal=True, key=f"dos_view{sx}")
     if view.startswith("📁"):
         names = [g["name"] for g in res["dossiers"]]
-        pick = st.selectbox("اختار ملف", ["الكل"] + names, key=f"dos_pick{sx}")
-        for g in res["dossiers"]:
-            if pick != "الكل" and g["name"] != pick:
-                continue
-            ico = "🇺🇸" if g.get("lens") else "📈" if g["type"] == "ترند" else "📁"
-            us_n = len(g.get("us_items") or [])
-            with st.expander(f"{ico} {g['name']} — {len(g['items'])} عنصر" + (f" · 🇺🇸 {us_n}" if us_n else ""), expanded=pick != "الكل"):
-                _dos_group(g, "الملف", f"{sx}d{names.index(g['name'])}")
+        if names:
+            def _dlabel(nm):
+                g_ = res["dossiers"][names.index(nm)]
+                ico_ = "🇺🇸" if g_.get("lens") else "📈" if g_["type"] == "ترند" else "📁"
+                return f"{ico_} {nm} — {len(g_['items'])} عنصر"
+            st.caption("بنعرض ملف واحد في المرة عشان الصفحة تفضل خفيفة. اختار الملف من القايمة.")
+            pick_d = st.selectbox(f"اختار ملف ({len(names)} ملف فيه أخبار)", names, format_func=_dlabel, key=f"dos_pick{sx}")
+            _dos_group(res["dossiers"][names.index(pick_d)], "الملف", f"{sx}d{names.index(pick_d)}")
         if not res["dossiers"]:
             st.info("مفيش ولا خبر دخل أي ملف. جرّب تجيب أخبار أكتر أو ضيف كلمات للملفات.")
     elif view.startswith("🧵"):
         st.caption("الخيط = أخبار فيها نفس الأطراف في أيام قريبة. مرتبة من الأهم (أخبار ومصادر وتصريحات أكتر).")
-        for n, t in enumerate(res["threads"], 1):
-            with st.expander(f"{n}. {t['name']} — {len(t['items'])} عنصر · الملف: {t['dossier']}"):
-                _dos_group(t, "الخيط", f"{sx}t{n}")
+        if res["threads"]:
+            tl_ = [f"{n}. {t['name']} — {len(t['items'])} عنصر · الملف: {t['dossier']}" for n, t in enumerate(res["threads"], 1)]
+            pick_t = st.selectbox(f"اختار خيط ({len(tl_)} خيط)", tl_, key=f"dos_tpick{sx}")
+            n_t = tl_.index(pick_t) + 1
+            _dos_group(res["threads"][n_t - 1], "الخيط", f"{sx}t{n_t}")
         if not res["threads"]:
             st.info("مفيش خيوط. جرّب تكبّر عدد الأيام أو تقلل الأطراف المشتركة لـ 1.")
     else:
@@ -3141,7 +3203,8 @@ def render_dossiers(P="pol"):
             st.markdown("**أطراف بتظهر كتير من غير ملف:** " + "، ".join(f"{e['entity']} ({e['count']})" for e in res["suggested_entities"]))
         if not res["suggested_words"]:
             st.info("مفيش كلمات متكررة كفاية.")
-    st.download_button("⬇️ نزّل التقرير كامل (ملف نصي)", dossiers_mod.briefing_md(res), file_name="dossiers_report.md", key=f"dos_dl{sx}")
+    if st.toggle("⬇️ جهّز التقرير الكامل للتنزيل (ملف نصي)", key=f"dos_dlt{sx}"):
+        st.download_button("⬇️ نزّل التقرير", dossiers_mod.briefing_md(res), file_name="dossiers_report.md", key=f"dos_dl{sx}")
 
 
 EG_PRESETS = {
