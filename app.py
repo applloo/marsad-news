@@ -981,6 +981,7 @@ def _res_sig(d):
 
 if PERSIST and "_res_loaded" not in st.session_state:
     st.session_state["_res_loaded"] = True
+    st.session_state["_res_loaded_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     st.session_state["_res_sigs"] = {}
     try:
         for _k, _v in (store.load_file(GH_TOKEN, GH_GIST, RES_FILE, {}) or {}).items():
@@ -1006,7 +1007,35 @@ def reload_results():
             st.session_state[f"res_{_k}"] = _v
             st.session_state["_res_sigs"][_k] = _res_sig(_v)
             n += 1
+    st.session_state["_res_loaded_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return n
+
+
+def auto_pull_jobs():
+    """لو بحث GitHub (الشامل أو تتبّع موضوع) خلص بعد ما فتحت الصفحة، بنحمّل نتيجته لوحدنا (بنبص كل دقيقتين بس)"""
+    ss = st.session_state
+    if not PERSIST or time.time() - ss.get("_jobs_chk", 0) < 120:
+        return False
+    ss["_jobs_chk"] = time.time()
+    loaded = keys_mod.parse(ss.get("_res_loaded_at") or "")
+    newest = None
+    for fname in (SEARCH_STATUS, TOPIC_STATUS):
+        try:
+            stt = store.load_file(GH_TOKEN, GH_GIST, fname, {}) or {}
+        except Exception:
+            continue
+        fin = keys_mod.parse(stt.get("finished") or "") if stt.get("state") == "done" else None
+        if fin and (newest is None or fin > newest):
+            newest = fin
+    if newest and (loaded is None or newest > loaded):
+        try:
+            reload_results()
+            ss["_res_loaded_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            ss["sa_status"] = store.load_file(GH_TOKEN, GH_GIST, SEARCH_STATUS, {}) or {}
+            return True
+        except Exception:
+            return False
+    return False
 
 
 def save_results():
@@ -2517,6 +2546,32 @@ def _dos_result(P="pol"):
 
 
 DOS_POOL_FILE = "marsad_dos_pool.json"
+DOS_PREFS_FILE = "marsad_dos_prefs.json"
+
+
+def _dos_prefs():
+    """آخر اختياراتك في تاب الخيوط (الفترة والربط واللينك)، بتتحفظ عشان تلاقيها زي ما سبتها على الموبايل والكمبيوتر"""
+    ss = st.session_state
+    if "dos_prefs" not in ss:
+        ss["dos_prefs"] = {}
+        if PERSIST:
+            try:
+                ss["dos_prefs"] = store.load_file(GH_TOKEN, GH_GIST, DOS_PREFS_FILE, {}) or {}
+            except Exception:
+                pass
+    return ss["dos_prefs"]
+
+
+def _dos_save_prefs(P, cur):
+    prefs = _dos_prefs()
+    if prefs.get(P) == cur:
+        return
+    prefs[P] = cur
+    if PERSIST:
+        try:
+            store.save_file(GH_TOKEN, GH_GIST, DOS_PREFS_FILE, prefs)
+        except Exception:
+            pass
 POOL_KEYS = ["url", "title", "title_ar", "title_en", "seendate", "domain", "country_ar", "snip_ar", "outlet"]
 
 
@@ -3082,6 +3137,8 @@ def render_dossiers(P="pol"):
         with st.expander("📖 ازاي تستخدم التبويب ده؟ (خطوة بخطوة)", expanded=_dos_result(P) is None):
             st.markdown(DOS_HELP)
         render_search_all()
+    if auto_pull_jobs():
+        st.success("✅ لقيت بحث جديد خلص على GitHub، وحمّلت نتايجه لوحدي.")
     pool = {a["url"]: a for a in _pool_for(P)}
     tabs_n = Counter(t_ for a in pool.values() for t_ in (a.get("tabs") or [a.get("tab", "")]) if (t_ in EG_TABS) == egp)
     st.markdown(f"🔎 **أرشيف البحث" + (" (الشأن المصري)" if egp else " (السياسة والمنطقة)") + f":** {len(pool)} خبر (آخر 21 يوم)"
@@ -3114,28 +3171,47 @@ def render_dossiers(P="pol"):
                            type=["csv"], accept_multiple_files=True, key=f"dos_up{sx}")
     DAYS_OPTS = {"آخر 6 ساعات": 0.25, "آخر 12 ساعة": 0.5, "آخر 24 ساعة": 1, "آخر يومين": 2, "آخر 3 أيام": 3, "آخر 5 أيام": 5,
                  "آخر 7 أيام": 7, "آخر 14 يوم": 14, "آخر 30 يوم": 30}
-    dl = pick(st, "📅 الأخبار بتاعة أنهي فترة؟ (أي حاجة أقدم من كده بتتشال)", list(DAYS_OPTS), "آخر 7 أيام", f"dos_days2{sx}")
+    pp = _dos_prefs().get(P) or {}
+    lk_opts = ["🌐 الصفحة الأصلية (للتصوير والمرجع)", "📖 صفحة الترجمة"]
+    dl = pick(st, "📅 الأخبار بتاعة أنهي فترة؟ (أي حاجة أقدم من كده بتتشال)", list(DAYS_OPTS),
+              pp.get("days") if pp.get("days") in DAYS_OPTS else "آخر 7 أيام", f"dos_days2{sx}")
     max_days = DAYS_OPTS[dl]
     st.caption("💡 اقتراح: **6 أو 12 ساعة** لو بتتابع حدث ساخن لسه حاصل. **24 ساعة أو 3 أيام** لقصة شغالة. **7 أيام** للصورة العامة (الافتراضي). **14 أو 30 يوم** للخلفية بس. "
                "الأخبار اللي مفيهاش ساعة (زي ملف أمريكا والمنشورات) بتتحسب باليوم.")
-    lk = st.radio("🔗 لما أدوس على عنوان خبر يفتح إيه؟", ["🌐 الصفحة الأصلية (للتصوير والمرجع)", "📖 صفحة الترجمة"], horizontal=True, key=f"dos_link_r{sx}")
+    lk = st.radio("🔗 لما أدوس على عنوان خبر يفتح إيه؟", lk_opts, index=1 if pp.get("link") == "tr" else 0, horizontal=True, key=f"dos_link_r{sx}")
     st.session_state["dos_link"] = "tr" if lk.startswith("📖") else "orig"
     st.caption("وجنب كل خبر لينك صغير تاني للتاني، فتقدر تفتح الاتنين.")
     c1, c2 = st.columns(2)
-    window = pick(c1, "أقصى فرق بالأيام بين خبرين في نفس الخيط", range(1, 8), 3, f"dos_win{sx}")
-    mins = pick(c2, "أقل عدد أطراف مشتركة (زي مصر + إثيوبيا = 2)", [1, 2, 3], 2, f"dos_min{sx}")
-    if st.button("🔗 اربط واعرض الملفات والخيوط", type="primary", use_container_width=True, key=f"dos_run{sx}"):
+    window = pick(c1, "أقصى فرق بالأيام بين خبرين في نفس الخيط", range(1, 8), int(pp.get("win") or 3), f"dos_win{sx}")
+    mins = pick(c2, "أقل عدد أطراف مشتركة (زي مصر + إثيوبيا = 2)", [1, 2, 3], int(pp.get("min") or 2), f"dos_min{sx}")
+    _dos_save_prefs(P, {"days": dl, "link": "tr" if lk.startswith("📖") else "orig", "win": window, "min": mins})
+    cur_params = {"max_days": max_days, "window": window, "mins": mins, "use": sorted(use)}
+    old_res = _dos_result(P)
+    auto = False
+    if old_res:
+        old_params = old_res.get("params") or {**cur_params, "max_days": old_res.get("max_days")}
+        auto = old_params != cur_params  # غيّرت الفترة أو الإعدادات: نربط تاني لوحدنا بدل ما نعرض القديم
+        made = keys_mod.parse(old_res.get("created"))
+        if made and max_days:
+            if made.tzinfo is None:
+                made = made.replace(tzinfo=timezone.utc)  # السيرفر بيكتب الوقت بتوقيت UTC
+            if datetime.now(timezone.utc) - made > timedelta(days=float(max_days)):
+                auto = True  # الربط المحفوظ أقدم من الفترة نفسها (زي ربط آخر 24 ساعة اتعمل من 3 أيام): نحدّثه
+    clicked = st.button("🔗 اربط واعرض الملفات والخيوط", type="primary", use_container_width=True, key=f"dos_run{sx}")
+    if clicked or auto:
         dos, err = dossiers_mod.parse_config(_dos_cfg_text(P))
         if err:
             st.error(f"تعريف الملفات فيه مشكلة: {err}")
         else:
-            with st.spinner("⏳ بيجمع ويربط…"):
+            with st.spinner("⏳ غيّرت الفترة، فبيربط تاني على الفترة الجديدة…" if auto and not clicked else "⏳ بيجمع ويربط…"):
                 items, counts = _dos_collect(use, ups, P)
                 if not items:
                     st.warning("مفيش أخبار. اعمل بحث في أي تاب، أو استنى التقرير اليومي، أو ضيف منشورات.")
                 else:
                     res = dossiers_mod.run(items, dos, window, mins, max_days)
                     res["counts"] = counts
+                    res["params"] = cur_params
+                    res["newest"] = max((str(it.get("date") or "") for it in items), default="")
                     ss[PROFS[P]["res_key"]] = res
                     if PERSIST:
                         try:
@@ -3155,13 +3231,21 @@ def render_dossiers(P="pol"):
     else:
         st.warning(f"⚠️ النتيجة دي اتعملت {ct} من غير فلتر فترة، فممكن فيها أخبار قديمة. دوس «اربط واعرض» تاني فوق عشان تتنضف.")
     try:
-        if res.get("first") and res.get("max_days") and str(res["first"])[:10] < (datetime.utcnow() - timedelta(days=float(res["max_days"]) + 1)).strftime("%Y-%m-%d"):
+        if res.get("first") and res.get("max_days") and str(res["first"])[:10] < (datetime.now(timezone.utc) - timedelta(days=float(res["max_days"]) + 1)).strftime("%Y-%m-%d"):
             st.warning("⚠️ النتيجة المعروضة قديمة (فيها أخبار أقدم من الفترة المختارة). دوس «اربط واعرض» تاني عشان تتحدّث.")
     except Exception:
         pass
     if not res.get("total"):
-        st.warning("مفيش أخبار في الفترة دي. اعمل بحث في التابات أو استنى التقرير اليومي، أو كبّر عدد الأيام.")
+        nw = res.get("newest") or ""
+        st.warning("مفيش أخبار في الفترة دي." + (f" أحدث خبر عندك في الأرشيف بتاريخ **{nw[:10]}**، يعني مفيش بحث جديد اتعمل من ساعتها." if nw else "")
+                   + " اعمل بحث جديد (أو «🚀 بحث شامل في كل المصادر» فوق ودوس «حدّث وحمّل النتايج») عشان تيجي أخبار النهارده، أو كبّر الفترة.")
         return
+    nw = res.get("newest") or ""
+    try:
+        if nw and res.get("max_days") and nw[:10] < (datetime.now(timezone.utc) - timedelta(days=float(res["max_days"]) + 1)).strftime("%Y-%m-%d"):
+            st.info(f"ℹ️ أحدث خبر عندك في الأرشيف بتاريخ {nw[:10]}. عشان تجيب أخبار النهارده اعمل بحث جديد أو «🚀 بحث شامل».")
+    except Exception:
+        pass
     st.caption(f"آخر ربط: {res.get('created', '').replace('T', ' ')} · الأخبار جت من: "
                + "، ".join(f"{k} ({v})" for k, v in (res.get("counts") or {}).items() if v))
     m = st.columns(4)
