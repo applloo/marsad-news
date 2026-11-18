@@ -47,8 +47,26 @@ def source_name(domain):
     return domain
 
 
+AR_NAMES = {  # أسماء الجرايد بالعربي زي ما بنقولها (الترجمة الآلية ممكن تقول «الحارس» بدل الجارديان)
+    "AP News": "أسوشيتد برس", "Al-Monitor": "المونيتور", "Atlantic Council": "المجلس الأطلسي", "Axios": "أكسيوس", "BBC": "بي بي سي",
+    "Baker Institute (Rice)": "معهد بيكر (جامعة رايس)", "Bloomberg": "بلومبرج", "Brookings": "معهد بروكينجز", "CNN": "سي إن إن",
+    "CSIS": "مركز الدراسات الاستراتيجية والدولية", "Chatham House": "تشاتام هاوس", "Council on Foreign Relations": "مجلس العلاقات الخارجية",
+    "DEBKAfile": "ديبكا", "Defense One": "ديفنس وان", "Financial Times": "فايننشال تايمز", "Foreign Affairs": "فورين أفيرز",
+    "Foreign Policy": "فورين بوليسي", "Fox News": "فوكس نيوز", "JNS (Jewish News Syndicate)": "جي إن إس (وكالة الأخبار اليهودية)",
+    "Jewish Chronicle": "جويش كرونيكل", "Jewish Insider": "جويش إنسايدر", "MSNBC": "إم إس إن بي سي", "Middle East Eye": "ميدل إيست آي",
+    "Middle East Institute": "معهد الشرق الأوسط", "Middle East Monitor": "ميدل إيست مونيتور", "NPR": "الإذاعة الوطنية الأمريكية NPR",
+    "Politico": "بوليتيكو", "Quincy Institute": "معهد كوينسي", "RUSI": "المعهد الملكي للخدمات المتحدة RUSI", "Reuters": "رويترز",
+    "Sky News": "سكاي نيوز", "The Economist": "الإيكونوميست", "The Guardian": "الجارديان", "The Hill": "ذا هيل",
+    "The Independent": "الإندبندنت", "The Intercept": "ذا إنترسبت", "The New Arab": "العربي الجديد (إنجليزي)",
+    "The New York Times": "نيويورك تايمز", "The Telegraph": "التلجراف", "The Times": "التايمز", "The Wall Street Journal": "وول ستريت جورنال",
+    "The Washington Post": "واشنطن بوست", "Washington Institute": "معهد واشنطن", "i24NEWS": "آي 24 نيوز", "openDemocracy": "أوبن ديموقراسي",
+}
+
+
 @st.cache_data(ttl=7 * 86400, show_spinner=False)
 def _ar_name(label):
+    if label in AR_NAMES:
+        return AR_NAMES[label]
     if re.search(r"[\u0600-\u06FF]", label):
         return label
     try:
@@ -495,6 +513,8 @@ def reader_page():
         st.success(f"🟢 طريقة جلب المقال: {via}")
     else:
         st.info(f"🟡 طريقة جلب المقال: {via} — لأن الموقع رفض فتحه مباشرة. (النص قد يختلف شكله قليلاً عن الأصل.)")
+    if core._host(url) and core._host(url) != "news.google.com":
+        st.markdown(f"📰 **الجريدة والبلد:** {src_label(core._host(url), with_domain=False)}", unsafe_allow_html=True)
     if art.get("authors") and not wr:
         st.markdown("✍️ **الكاتب (من توقيع المقال):** " + html.escape("، ".join(art["authors"])))
     elif not wr and not art.get("authors"):
@@ -2722,8 +2742,9 @@ def _dos_group(g, scope, key):
             kinds = ["🔎 تقرير تتبّع (خط زمني + مقارنة المصادر + استنتاج)"] + kinds
         kind = st.radio("عايز إيه؟", kinds, horizontal=True, key=f"dos_pk_{key}")
         egy = True
-        if not (kind.startswith("🧠") or kind.startswith("📜") or kind.startswith("🔎") or kind.startswith("🇪🇬")):
-            egy = st.checkbox("🇪🇬 اكتب من منظور مصري وعربي (القضية الفلسطينية مركزية، والمقياس هو مصلحتنا)", value=not eg_mode_, key=f"dos_egy_{key}")
+        if kind.startswith("🧭"):  # الزاوية القومية في اسكريبت 3 بس
+            egy_lbl = "🇪🇬 اكتب من زاوية قومية مصرية وعربية (المقياس هو مصلحة مصر والعرب)"
+            egy = st.checkbox(egy_lbl, value=not eg_mode_, key=f"dos_egy_{key}")
         if kind.startswith("🇪🇬"):
             mins = pick(st, "مدة الفيديو (دقايق)", [3, 5, 8, 10, 15, 20], 8, f"dos_pme_{key}")
             txt = dossiers_mod.eg_script_prompt(g, mins)
