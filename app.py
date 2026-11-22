@@ -15,6 +15,10 @@ import streamlit as st
 
 import core
 import dossiers as dossiers_mod
+import analysis_lab as analysis_lab_mod
+import casebook as casebook_mod
+import case_links as case_links_mod
+import early_warning as early_warning_mod
 import intel
 from core import fmt_seen, tr
 import gh_actions
@@ -91,49 +95,48 @@ def src_label(domain, with_domain=True):
         return html.escape(str(domain or "")) + f" (تعذّر تحديد الدولة: {type(e).__name__})"
 
 
-st.set_page_config(page_title="رادار الأخبار العالمية", page_icon="📰", layout="centered")
+st.set_page_config(page_title="مرصد الأخبار", page_icon="🛰️", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown(
     """
 <style>
-.stApp, .stMarkdown, label, [data-testid="stWidgetLabel"] {direction: rtl; text-align: right;}
-.ar-title {font-size:1.15rem; font-weight:700; line-height:1.7; margin-bottom:4px;}
-.ltr {direction:ltr; text-align:left; color:#6b7280; font-size:.9rem; margin-bottom:2px;}
-.meta {color:#6b7280; font-size:.85rem; margin:6px 0;}
-.badge {background:#eef2ff; color:#3730a3; padding:1px 8px; border-radius:10px; font-size:.78rem;}
-a.btn {display:inline-block; background:#1d4ed8; color:#fff !important; padding:8px 18px;
-       border-radius:8px; text-decoration:none; font-weight:600; margin-top:4px;}
-a.btn:hover {background:#1e40af;}
-.card {border:1px solid rgba(128,128,128,.3); border-radius:10px; padding:12px 14px; margin-bottom:10px;}
+:root { --marsad-bg:#07111f; --marsad-panel:#101e30; --marsad-line:#263c56; --marsad-accent:#168cf0; --marsad-muted:#91a4ba; }
+.stApp { background: radial-gradient(ellipse at 50% -20%, #17375b 0%, #091728 42%, #07111f 78%); }
+[data-testid="stHeader"] { background:rgba(7,17,31,.88); }
+[data-testid="stMainBlockContainer"] { max-width:1500px; padding-top:1.1rem; padding-bottom:3rem; }
+.stMarkdown, label, [data-testid="stWidgetLabel"], [data-testid="stCaptionContainer"] { direction:rtl; text-align:right; }
+h1,h2,h3 { letter-spacing:0; }
+h1 { font-size:clamp(1.5rem,2.4vw,2.25rem)!important; font-weight:800!important; }
+.ar-title {font-size:1.08rem; font-weight:750; line-height:1.8; margin-bottom:4px;}
+.ltr {direction:ltr; text-align:left; color:#9aacc0; font-size:.86rem; margin-bottom:2px;}
+.meta {color:var(--marsad-muted); font-size:.82rem; margin:6px 0;}
+.badge {background:#16385a; color:#bfe3ff; padding:2px 9px; border-radius:999px; font-size:.76rem;}
+a.btn {display:inline-block; background:#087bd4; color:#fff!important; padding:8px 16px; border-radius:10px; text-decoration:none; font-weight:650; margin-top:4px;}
+a.btn:hover {background:#1596ff;}
+.card,.hm-row {border:1px solid var(--marsad-line); border-radius:14px; padding:13px 15px; margin-bottom:10px; background:linear-gradient(145deg,rgba(21,42,66,.92),rgba(12,27,44,.9));}
 .article-body p {line-height:2; font-size:1.05rem; margin-bottom:1rem;}
-/* التابات: تنزل على أكثر من سطر فتظهر كلها بلا تمرير جانبي، وأزرارها أكبر لسهولة اللمس */
-[data-baseweb="tabs"], [data-baseweb="tabs"] > div {overflow: visible !important; height: auto !important; max-height: none !important;}
-[role="tablist"] {flex-wrap: wrap !important; overflow: visible !important; height: auto !important; max-height: none !important;
-    gap: 6px 4px; row-gap: 6px; width: 100% !important;}
-[role="tablist"] button[role="tab"] {padding: 10px 14px !important; height: auto !important; min-height: 44px !important;
-    border: 1px solid rgba(128,128,128,.35) !important; border-radius: 10px !important; background: rgba(128,128,128,.08) !important;}
-[role="tablist"] button[aria-selected="true"] {background: rgba(255,75,75,.18) !important; border-color: #ff4b4b !important; font-weight: 700;}
-[data-baseweb="tab-highlight"], [data-baseweb="tab-border"] {display: none !important;}
-[data-baseweb="tabs"] button:not([role="tab"]) {display: none !important;}  /* أسهم التمرير */
-::-webkit-scrollbar {height: 14px; width: 14px;}
-::-webkit-scrollbar-thumb {background: rgba(128,128,128,.6); border-radius: 8px;}
-/* ألوان تابات الأقسام الاربعة (إسرائيلي/أمريكي/بريطاني/إقليمي) وحجم أكبر */
-[data-testid="stTabs"] > div:first-child [role="tablist"] button[role="tab"]:nth-child(4) {background:#c0392b !important; border-color:#e74c3c !important; color:#fff !important;}
-[data-testid="stTabs"] > div:first-child [role="tablist"] button[role="tab"]:nth-child(5) {background:#2563c9 !important; border-color:#4f8cf0 !important; color:#fff !important;}
-[data-testid="stTabs"] > div:first-child [role="tablist"] button[role="tab"]:nth-child(6) {background:#d9822b !important; border-color:#f2a655 !important; color:#fff !important;}
-[data-testid="stTabs"] > div:first-child [role="tablist"] button[role="tab"]:nth-child(7) {background:#2a8f55 !important; border-color:#4cc783 !important; color:#fff !important;}
-[data-testid="stTabs"] > div:first-child [role="tablist"] button[role="tab"]:nth-child(n+4):nth-child(-n+7) {font-weight:700; min-height:50px !important; border-radius:16px !important;}
-[data-testid="stTabs"] > div:first-child [role="tablist"] button[aria-selected="true"]:nth-child(n+4):nth-child(-n+7) {box-shadow:0 0 0 3px rgba(255,255,255,.55), 0 4px 14px rgba(0,0,0,.45);}
-.hm-stat {border:1px solid rgba(128,128,128,.3); border-radius:12px; padding:10px 12px; text-align:center;}
-.hm-stat b {display:block; font-size:1.5rem;}
-.hm-row {border:1px solid rgba(128,128,128,.28); border-radius:12px; padding:10px 12px; margin-bottom:8px;}
-.hm-tag {font-size:.75rem; padding:1px 8px; border-radius:10px; color:#fff; margin-left:6px;}
-@media (max-width:640px){ .ar-title{font-size:1.05rem;} }
+[data-testid="stTabs"] > div[role="tablist"] { gap:7px; padding:7px; border:1px solid rgba(100,145,190,.25); border-radius:15px; background:rgba(8,22,38,.76); flex-wrap:nowrap; overflow-x:auto; }
+[data-testid="stTabs"] button[role="tab"] { border:1px solid #29435f!important; border-radius:11px!important; padding:10px 16px!important; min-height:44px!important; background:#12243a!important; color:#d7e7f8!important; white-space:nowrap!important; font-weight:650!important; }
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] { background:linear-gradient(135deg,#087bd4,#0755a0)!important; border-color:#28a7ff!important; color:white!important; box-shadow:0 0 0 1px rgba(40,167,255,.2),0 5px 18px rgba(0,80,160,.25)!important; }
+[data-baseweb="tab-highlight"],[data-baseweb="tab-border"] {display:none!important;}
+[data-testid="stVerticalBlockBorderWrapper"] { border-color:rgba(100,145,190,.22)!important; border-radius:15px!important; }
+[data-testid="stMetric"] { background:rgba(17,37,59,.8); border:1px solid var(--marsad-line); border-radius:13px; padding:12px; }
+[data-testid="stButton"] button[kind="primary"],button[kind="primary"] { background:linear-gradient(120deg,#087bd4,#0755a0); border:1px solid #249dff; border-radius:11px; font-weight:750; }
+[data-testid="stExpander"] { border:1px solid rgba(100,145,190,.25); border-radius:12px; background:rgba(14,30,48,.55); }
+[data-baseweb="select"] > div, [data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea { border-radius:10px!important; }
+[data-testid="stCaptionContainer"] { color:#9eb1c6; }
+.hm-stat {border:1px solid var(--marsad-line); border-radius:13px; padding:12px; text-align:center; background:rgba(16,34,54,.9);}
+.hm-stat b {display:block; font-size:1.55rem; color:#f0f7ff;}
+.hm-tag {font-size:.73rem; padding:2px 9px; border-radius:999px; color:#fff; margin-left:6px;}
+@media(max-width:720px){
+ [data-testid="stMainBlockContainer"] {padding-left:.7rem;padding-right:.7rem;}
+ [data-testid="stTabs"] button[role="tab"] {padding:8px 11px!important;font-size:.86rem!important;}
+ .ar-title {font-size:1rem;}
+}
 </style>
 """,
     unsafe_allow_html=True,
 )
-
 
 
 # ───────────────────────── القراءة الصوتية ─────────────────────────
@@ -871,7 +874,8 @@ def do_analyze():
 # ───────────────────────── الواجهة الرئيسية ─────────────────────────
 
 show_logo()
-st.title("📰 رادار الأخبار العالمية")
+st.title("🛰️ مرصد الأخبار")
+st.caption("منصة رصد وتحليل الأخبار والمعلومات من مصادر متعددة")
 if not IS_ADMIN:
     _a = st.session_state["auth"]
     st.info(f"🎟️ نسخة تجريبية لـ «{_a.get('label', '')}» — "
@@ -1082,8 +1086,22 @@ _now0 = datetime.now(timezone.utc)
 query, match, joiner, ctype = "", core.MATCH_MODES[0], "AND", "الكل"
 start_utc, end_utc, max_rec, verify, hide_nomatch = _now0 - timedelta(days=7), _now0, 30, True, False
 
-home_box = st.container()
-tab_dr, tab_wr, tab_ml, tab_il, tab_us, tab_uk, tab_rg, tab_eg, tab_br, tab_in, tab_gd, tab_dos, tab_sv, tab_ms = st.tabs(TAB_NAMES)
+# تنقّل رئيسي مختصر: الوظائف مجمّعة حسب المهمة بدل 14 تبويباً متزاحماً.
+tab_home, tab_search, tab_intel, tab_ops, tab_library, tab_settings = st.tabs([
+    "🏠 الرئيسية", "🔎 البحث والرصد", "🛰️ التحليل والاستخبارات",
+    "⏱️ غرفة العمليات", "🗂️ الملفات والأرشيف", "⚙️ المصادر والإعدادات"
+])
+with tab_search:
+    tab_geo, tab_eg, tab_ml, tab_br, tab_gd = st.tabs([
+        "🌍 بحث حسب المنطقة", "🇪🇬 الشأن المصري", "🔤 ترجمة ثم بحث", "🗞️ تصفح المصادر", "🌐 بحث GDELT"
+    ])
+with tab_intel:
+    tab_wr, tab_in = st.tabs(["✍️ كتّاب ومحللون", "🛰️ مكتب الاستخبارات"])
+with tab_library:
+    tab_dos, tab_sv, tab_lab = st.tabs(["🧵 الملفات والخيوط", "📌 المحفوظات", "🧠 ورشة التحليل"])
+tab_dr = tab_ops
+tab_ms = tab_settings
+home_box = tab_home
 
 
 def use_filters(p, level="full"):
@@ -1488,7 +1506,9 @@ def body_search(key, sel, terms, gn_country, n):
 
 
 def curated_tab(key, groups, gd_country, gn_country, btn_label):
-    sel = pick_sources(key, groups)
+    with st.expander("🗂️ اختيار المصادر ونطاق التغطية", expanded=False):
+        sel = pick_sources(key, groups)
+    st.caption(f"المصادر المحددة: {len(sel)} — افتح اختيار المصادر لتخصيص الصحف والمواقع.")
     pool = all_entries(key, groups)
     scope = st.radio("نطاق البحث", ["كل المصادر المختارة أعلاه", "🎯 داخل مصدر واحد فقط"], horizontal=True, key=f"{key}_scope")
     if scope.startswith("🎯"):
@@ -1687,11 +1707,11 @@ def render_home():
     for col, num, lab in ((s1, today_n, "خبر النهارده (في نتايجك)"), (s2, len(all_items), "خبر محفوظ في الاقسام"), (s3, n_src, "مصدر مراقب")):
         col.markdown(f"<div class='hm-stat'><b>{num}</b>{lab}</div>", unsafe_allow_html=True)
     if not h:
-        st.caption("اكتب كلمة وادوس «ابحث في كل الاقسام»، وهتلاقي هنا اخر الاخبار من كل الاقسام مرتبة بالاحدث، وتفاصيل كل قسم في التاب بتاعه تحت.")
+        st.caption("اكتب موضوعك مرة واحدة، وهتظهر النتائج مجمعة زمنياً. باقي أدوات الرصد والتحليل موجودة في الأقسام الرئيسية أعلى الصفحة.")
         return
     cnt = " · ".join(f"{HOME_SECTIONS[k][0]}: {n}" for k, n in h.get("counts", {}).items())
     st.markdown(f"**نتيجة «{html.escape(h.get('q', ''))}»** — اخر {h.get('days')} يوم — {cnt}")
-    st.caption("دي اخر الاخبار مجمعة. للتفاصيل (ملخص، ترجمة المقال، حفظ) افتح تاب القسم تحت.")
+    st.caption("دي آخر الأخبار مجمعة. للتفاصيل (ملخص، ترجمة المقال، حفظ) افتح قسم البحث والرصد.")
     for a in h["items"][:25]:
         sec = HOME_SECTIONS.get(a.get("_sec"), ("", None, "", "#555"))
         ttl = html.escape(a.get("title_ar") or a.get("title") or "")
@@ -1704,29 +1724,24 @@ def render_home():
 
 with home_box:
     render_home()
-style_tabs()
-reader_scroll_tool()
-
-with tab_il:
-    use_filters("il", "full")
-    st.caption("يُترجم بحثك إلى العبرية للمصادر العبرية، وإلى الإنجليزية للنسخ الإنجليزية.")
-    curated_tab("il", ISRAEL, "IS", "IL", "ابحث في المصادر الإسرائيلية")
-
-with tab_us:
-    use_filters("us", "full")
-    st.caption("مصادر أمريكية مهتمة بالشرق الأوسط (Axios وغيرها) ومراكز أبحاث.")
-    curated_tab("us", USA, "US", "US", "ابحث في المصادر الأمريكية")
-
-with tab_uk:
-    use_filters("uk", "full")
-    st.caption("صحف وقنوات بريطانية ومصادر متخصصة بالشرق الأوسط.")
-    curated_tab("uk", UK, "UK", "UK", "ابحث في المصادر البريطانية")
-
-with tab_rg:
-    use_filters("rg", "full")
-    st.caption("إثيوبيا (سد النهضة والقرن الأفريقي) وتركيا (شرق المتوسط) وإيران (اليمن والخليج). يُترجم بحثك تلقائياً إلى الأمهرية "
-               "أو التركية أو الفارسية أو الإنجليزية بحسب لغة كل مصدر. اختر مصدراً واحداً أو عدة مصادر أو كلها، أو ابحث داخل مصدر واحد.")
-    curated_tab("rg", REGION, None, "US", "ابحث في مصادر تركيا وإيران وإثيوبيا")
+with tab_geo:
+    geo_options = {
+        "🇮🇱 إسرائيل": ("il", ISRAEL, "IS", "IL", "ابحث في المصادر الإسرائيلية",
+                         "يُترجم بحثك إلى العبرية للمصادر العبرية، وإلى الإنجليزية للنسخ الإنجليزية."),
+        "🇺🇸 الولايات المتحدة": ("us", USA, "US", "US", "ابحث في المصادر الأمريكية",
+                                  "مصادر أمريكية ومراكز أبحاث وصحافة دولية ناطقة بالإنجليزية."),
+        "🇬🇧 بريطانيا": ("uk", UK, "UK", "UK", "ابحث في المصادر البريطانية",
+                          "صحف وقنوات بريطانية ومصادر متخصصة بالشرق الأوسط."),
+        "🌍 تركيا وإيران وإثيوبيا": ("rg", REGION, None, "US", "ابحث في مصادر تركيا وإيران وإثيوبيا",
+                                     "مصادر محلية بلغاتها: التركية والفارسية والأمهرية والإنجليزية.")
+    }
+    geo_choice = st.radio("نطاق الرصد", list(geo_options), horizontal=True, key="geo_scope")
+    geo_key, geo_groups, geo_gd, geo_gn, geo_label, geo_help = geo_options[geo_choice]
+    use_filters(geo_key, "full")
+    st.caption(geo_help)
+    if geo_key == "rg":
+        st.caption("اختر مصدراً واحداً أو عدة مصادر أو كلها، أو ابحث داخل مصدر واحد.")
+    curated_tab(geo_key, geo_groups, geo_gd, geo_gn, geo_label)
 
 DAY_OPTS = {"آخر 24 ساعة": 1, "آخر 3 أيام": 3, "آخر 7 أيام": 7, "آخر 14 يوماً": 14, "آخر 30 يوماً": 30}
 
@@ -2052,17 +2067,21 @@ def writers_panel(pfx, gcodes, btn_label, codes):
     days_label = st.selectbox("الفترة", list(DAY_OPTS.keys()), index=2, key=f"{pfx}_days")
     sel_ids = []
     all_w = current_writers()
-    for gcode in gcodes:
-        gname = GROUP_LABELS[gcode]
-        ws_ = [w for w in all_w if w["country"] == gcode]
-        if not ws_:
-            continue
-        label_to_id = {f"{w['name_ar']} — {w['outlet']}": w["id"] for w in ws_}
-        picked = st.multiselect(
-            gname, list(label_to_id), default=[l for l, i in label_to_id.items() if next(w for w in ws_ if w["id"] == i)["default"]],
-            key=f"{pfx}_{gname}",
-        )
-        sel_ids += [label_to_id[p] for p in picked]
+    with st.expander("👥 اختيار الكُتّاب والمحللين", expanded=False):
+        kinds = st.multiselect("تخصص الكاتب", ["رأي", "تحليل", "خبر"], default=["رأي", "تحليل", "خبر"],
+                               key=f"{pfx}_writer_kinds", help="فلتر الكُتّاب حسب طبيعة إنتاجهم، وليس نوع المقال وحده.")
+        for gcode in gcodes:
+            gname = GROUP_LABELS[gcode]
+            ws_ = [w for w in all_w if w["country"] == gcode and w.get("kind", "رأي") in kinds]
+            if not ws_:
+                continue
+            label_to_id = {f"{w['name_ar']} — {w['outlet']} · {w.get('kind', 'رأي')}": w["id"] for w in ws_}
+            picked = st.multiselect(
+                gname, list(label_to_id), default=[l for l, i in label_to_id.items() if next(w for w in ws_ if w["id"] == i)["default"]],
+                key=f"{pfx}_{gname}",
+            )
+            sel_ids += [label_to_id[p] for p in picked]
+    st.caption(f"عدد الكُتّاب المختارين: {len(sel_ids)} من {sum(1 for w in all_w if w['country'] in gcodes)}")
     if pfx == "wa" and not sel_ids:
         st.info("لسه ما اضفتش كتّاب عرب. روح تاب «مصادري» ← «إضافة ككاتب» واكتب الاسم وحساب تويتر واختار الجنسية.")
     if pfx == "wa":
@@ -3142,7 +3161,566 @@ def render_search_all():
 
 
 @_fragment
+def render_custom_collections(P="pol"):
+    """إنشاء ملفات بحث يدوية وخيوط قصص يختار المستخدم عناصرها بنفسه."""
+    st.markdown("### ✍️ ملفاتك وخيوطك الخاصة")
+    st.caption("الملف موضوع ثابت له كلمات متابعة، أما الخيط فهو مجموعة أخبار تختارها أنت يدوياً حتى لو لم يلتقطها الربط الآلي.")
+    left, right = st.columns(2)
+    with left:
+        with st.expander("➕ إنشاء ملف متابعة جديد", expanded=False):
+            with st.form(f"custom_dossier_form_{P}"):
+                nm = st.text_input("اسم الملف", placeholder="مثال: المفاوضات المصرية حول غزة")
+                words = st.text_area("كلمات وأسماء وأطراف الملف، افصل بينها بفاصلة", placeholder="مصر، غزة، رفح، المفاوضات")
+                desc = st.text_area("وصف الملف / سؤال البحث (اختياري)", height=70)
+                if st.form_submit_button("إنشاء الملف", use_container_width=True):
+                    terms = [x.strip() for x in re.split(r"[,،\n]+", words) if x.strip()]
+                    if not nm.strip() or not terms:
+                        st.error("اكتب اسم الملف وكلمة متابعة واحدة على الأقل.")
+                    else:
+                        try:
+                            cfg = dossiers_mod.add_dossier(_dos_cfg_text(P), nm.strip(), terms, "ملف")
+                            _dos_save_cfg(cfg, P)
+                            rec = analysis_lab_mod.new_record(nm, desc, terms, "ملف")
+                            S().setdefault("custom_dossiers", []).append({**rec, "scope": P})
+                            persist()
+                            st.success("اتعمل الملف واتضاف لمحرك الربط. اضغط «اربط» لتجميع الأخبار الموجودة.")
+                        except Exception as e:
+                            st.error(f"تعذر إنشاء الملف: {type(e).__name__}: {e}")
+    with right:
+        pool = list(_pool_for(P))
+        by_url = {a.get("url"): a for a in pool if a.get("url")}
+        labels = {f"{(a.get('title_ar') or a.get('title') or '')[:105]} · {a.get('domain','')} · {str(a.get('seendate',''))[:8]}": u for u, a in by_url.items()}
+        with st.expander("🧵 إنشاء خيط يدوي من أخبار تختارها", expanded=False):
+            with st.form(f"custom_thread_form_{P}"):
+                tname = st.text_input("اسم الخيط", placeholder="مثال: تحركات واشنطن قبل القمة")
+                chosen = st.multiselect("اختار الأخبار التي تنتمي للخيط", list(labels))
+                tdesc = st.text_area("ما الرابط أو الفرضية التي تريد اختبارها؟", height=70)
+                if st.form_submit_button("إنشاء الخيط", use_container_width=True):
+                    urls = [labels[x] for x in chosen]
+                    if not tname.strip() or len(urls) < 2:
+                        st.error("اكتب اسم الخيط واختر خبرين على الأقل.")
+                    else:
+                        rec = analysis_lab_mod.new_record(tname, tdesc, [], "خيط", urls)
+                        rec["scope"] = P
+                        S().setdefault("custom_threads", []).insert(0, rec)
+                        persist()
+                        st.success(f"اتحفظ الخيط وفيه {len(urls)} خبر.")
+    custom_files = [x for x in S().get("custom_dossiers", []) if x.get("scope", "pol") == P]
+    custom_threads = [x for x in S().get("custom_threads", []) if x.get("scope", "pol") == P]
+    if custom_files or custom_threads:
+        with st.expander(f"📚 مجموعاتك الخاصة ({len(custom_files)} ملف · {len(custom_threads)} خيط)", expanded=False):
+            for typ, records in (("ملف", custom_files), ("خيط", custom_threads)):
+                if records:
+                    st.markdown(f"**{typ}**")
+                    for rec in records:
+                        c1, c2 = st.columns([6, 1])
+                        c1.markdown(f"**{rec.get('name')}** · {len(rec.get('tags', [])) if typ == 'ملف' else len(rec.get('articles', []))} {'كلمة' if typ == 'ملف' else 'خبر'}")
+                        if rec.get("description"):
+                            c1.caption(rec["description"])
+                        if c2.button("حذف", key=f"del_custom_{typ}_{rec['id']}_{P}"):
+                            key = "custom_dossiers" if typ == "ملف" else "custom_threads"
+                            S()[key] = [x for x in S().get(key, []) if x.get("id") != rec.get("id")]
+                            persist()
+                            st.rerun()
+                        if typ == "خيط":
+                            _thread_articles = [by_url[u] for u in rec.get("articles", []) if u in by_url]
+                            if _thread_articles and st.button("🧠 جهّز تحليل الخيط", key=f"analyse_thread_{rec['id']}"):
+                                _prompt = analysis_lab_mod.make_prompt("تحليل ملف مقالات متراكم", _thread_articles,
+                                    case_name=rec.get("name", "خيط يدوي"), author_profile="راجع بطاقات الكُتّاب المحفوظة، ولا تفترض ميولاً غير موثقة.",
+                                    custom_outlets=S().get("outlet_profiles", {}),
+                                    custom_writers=S().get("writer_profiles", {}))
+                                st.session_state["analysis_lab_prompt"] = _prompt
+                                st.session_state["analysis_lab_articles"] = _thread_articles
+                                st.success("البرومبت جاهز في تبويب ورشة التحليل.")
+
+
+def render_analysis_lab():
+    """ورشة تحليل مقال منفرد أو مجموعة مقالات، مع توصيف المنبر والكاتب وبرومبتات مقارنة."""
+    st.markdown("### 🧠 ورشة تحليل المقالات والرأي")
+    st.caption("حلّل مقالاً منفرداً، أو قارن مقالات رأي، أو اجمع سلسلة مقالات داخل ملف واحد. البرومبتات تفصل بين الوقائع والرأي والاستنتاج، ولا تفترض توجه الكاتب من اسم الصحيفة.")
+    pool = list(_dos_pool().values())
+    saved = list(S().get("saved", []))
+    combined = []
+    seen = set()
+    for a in saved + pool:
+        u = a.get("url")
+        if u and u not in seen:
+            seen.add(u)
+            combined.append(a)
+    labels = {}
+    for i, a in enumerate(combined):
+        label = f"{(a.get('title_ar') or a.get('title') or 'بدون عنوان')[:115]} · {a.get('domain') or a.get('outlet') or ''} · {str(a.get('seendate') or '')[:8]} · {i+1}"
+        labels[label] = a
+    with st.expander("🏛️ توصيف الصحف والمنصات", expanded=False):
+        domain = st.text_input("دومين المنبر", placeholder="مثال: nytimes.com", key="lab_domain")
+        current = analysis_lab_mod.outlet_profile(domain, S().get("outlet_profiles", {})) if domain else {}
+        c1, c2 = st.columns(2)
+        name = c1.text_input("اسم المنبر", value=current.get("name", ""), key="lab_out_name")
+        country = c2.text_input("الدولة", value=current.get("country", ""), key="lab_out_country")
+        ownership = c1.text_input("الملكية / التمويل المعلن", value=current.get("ownership", ""), key="lab_out_ownership")
+        orientation = c2.text_input("التوجه التحريري التقريبي", value=current.get("orientation", ""), key="lab_out_orientation")
+        outlet_type = st.text_input("نوع المنبر", value=current.get("type", ""), key="lab_out_type")
+        caveat = st.text_area("ملاحظات وحدود التوصيف", value=current.get("caveat", ""), key="lab_out_caveat", height=65)
+        if st.button("حفظ بطاقة المنبر", key="lab_save_outlet"):
+            if domain.strip():
+                S().setdefault("outlet_profiles", {})[domain.strip().lower().replace("www.", "")] = {
+                    "name": name, "country": country, "ownership": ownership, "orientation": orientation,
+                    "type": outlet_type, "caveat": caveat, "confidence": "إدخال المستخدم / يحتاج توثيق"}
+                persist()
+                st.success("تم حفظ بطاقة المنبر.")
+            else:
+                st.warning("اكتب الدومين أولاً.")
+    with st.expander("✍️ بطاقات الكُتّاب والمحللين", expanded=False):
+        allw = current_writers()
+        writer_labels = {f"{w.get('name_ar')} · {w.get('outlet')} · {w.get('kind')}": w for w in allw}
+        picked_writer = st.selectbox("اختار كاتباً", ["إضافة بطاقة يدوية"] + list(writer_labels), key="lab_writer_pick")
+        base_w = writer_labels.get(picked_writer, {})
+        wid = base_w.get("id") or st.text_input("معرّف الكاتب", key="lab_writer_id")
+        wname = st.text_input("اسم الكاتب", value=base_w.get("name_ar", ""), key="lab_writer_name")
+        woutlet = st.text_input("المنبر المعتاد", value=base_w.get("outlet", ""), key="lab_writer_outlet")
+        wbio = st.text_area("سيرة مهنية ومجالات تخصص ومواقف موثقة (مع روابط إن أمكن)",
+                            value=S().get("writer_profiles", {}).get(wid, ""), height=100, key="lab_writer_bio")
+        if st.button("حفظ بطاقة الكاتب", key="lab_save_writer"):
+            if wid and wname:
+                S().setdefault("writer_profiles", {})[wid] = {"name": wname, "outlet": woutlet, "profile": wbio}
+                persist()
+                st.success("تم حفظ بطاقة الكاتب. لن تُعرض الميول كحقيقة إلا إذا دعمتها مصادر موثقة.")
+            else:
+                st.warning("حدد كاتباً أو اكتب معرّفاً واسماً.")
+    st.divider()
+    with st.form("analysis_lab_form"):
+        kind = st.selectbox("نوع التحليل", ["تحليل مقال واحد", "مقارنة مقالات رأي", "تحليل ملف مقالات متراكم", "تحليل التناقضات بين المصادر", "ملف صحفي عن كاتب أو صحيفة"])
+        case_name = st.text_input("اسم الملف / القضية", placeholder="مثال: اتجاهات الصحافة الأمريكية تجاه إيران")
+        chosen_labels = st.multiselect("اختار مقالات من أرشيف البحث والمحفوظات", list(labels))
+        title = st.text_input("عنوان مقال إضافي (اختياري)")
+        article_url = st.text_input("رابط المقال الإضافي")
+        article_author = st.text_input("اسم الكاتب")
+        article_outlet = st.text_input("اسم الصحيفة / المنبر")
+        article_date = st.text_input("تاريخ النشر")
+        article_domain = st.text_input("دومين المنبر (اختياري)")
+        article_text = st.text_area("الصق نص المقال أو مقتطفاً كبيراً هنا (مهم للتحليل الدقيق)", height=220)
+        author_profile = st.text_area("ملاحظات عن الكاتب (اختياري، مع مصادرها)", height=75)
+        save_case = st.checkbox("احفظ هذه المجموعة كملف تحليلي للرجوع إليها", value=True)
+        submitted = st.form_submit_button("🧠 جهّز برومبت التحليل", type="primary", use_container_width=True)
+    if submitted:
+        articles = [dict(labels[x]) for x in chosen_labels]
+        if title.strip() or article_text.strip() or article_url.strip():
+            articles.insert(0, {"title": title, "title_ar": title, "url": article_url, "writer": article_author,
+                                "outlet": article_outlet, "date": article_date, "domain": article_domain,
+                                "text": article_text, "summary": article_text[:1200]})
+        if not articles:
+            st.warning("اختار مقالاً من الأرشيف أو أضف مقالاً يدوياً.")
+        elif kind == "تحليل مقال واحد" and len(articles) > 1:
+            articles = articles[:1]
+            st.info("نوع التحليل مقال واحد، لذلك استخدمت أول مقال فقط.")
+        if articles:
+            custom_profiles = S().get("outlet_profiles", {})
+            inferred_author = article_author or (articles[0].get("writer") if articles else "") or "غير محدد"
+            inferred_profile = author_profile
+            if not inferred_profile and inferred_author:
+                for _wid, _wp in S().get("writer_profiles", {}).items():
+                    if _wp.get("name") == inferred_author or _wid == inferred_author:
+                        inferred_profile = _wp.get("profile", "")
+                        break
+            prompt = analysis_lab_mod.make_prompt(kind, articles, case_name or "ملف بحثي", author=inferred_author,
+                outlet=article_outlet or (articles[0].get("outlet") if articles else "") or "غير محدد",
+                author_profile=inferred_profile, custom_outlets=custom_profiles, custom_writers=S().get("writer_profiles", {}))
+            st.session_state["analysis_lab_prompt"] = prompt
+            st.session_state["analysis_lab_articles"] = articles
+            if save_case:
+                rec = analysis_lab_mod.new_record(case_name or (articles[0].get("title") or "مجموعة تحليل"),
+                    f"{kind} · {len(articles)} مادة", [], "تحليل", [a.get("url") for a in articles if a.get("url")])
+                rec.update({"prompt": prompt, "analysis_type": kind, "articles": articles})
+                S().setdefault("analysis_cases", []).insert(0, rec)
+                persist()
+                st.success("اتحفظ الملف التحليلي في ورشة التحليل.")
+    if st.session_state.get("analysis_lab_prompt"):
+        st.markdown("#### البرومبت الجاهز")
+        st.caption("انسخه إلى نموذج الذكاء الاصطناعي. لو المقال خلف اشتراك أو الأرشيف لا يحتوي نصه الكامل، الصق النص بنفسك قبل طلب تحليل تفصيلي.")
+        st.code(st.session_state["analysis_lab_prompt"], language=None)
+    cases = S().get("analysis_cases", [])
+    if cases:
+        with st.expander(f"📚 ملفات التحليل المحفوظة ({len(cases)})", expanded=False):
+            for rec in cases[:30]:
+                c1, c2, c3 = st.columns([5, 1, 1])
+                c1.markdown(f"**{rec.get('name')}** · {rec.get('analysis_type','')} · {len(rec.get('articles', []))} مادة")
+                if c2.button("فتح", key=f"lab_open_{rec['id']}"):
+                    st.session_state["analysis_lab_prompt"] = rec.get("prompt", "")
+                    st.rerun()
+                if c3.button("حذف", key=f"lab_del_{rec['id']}"):
+                    S()["analysis_cases"] = [x for x in cases if x.get("id") != rec.get("id")]
+                    persist()
+                    st.rerun()
+
+
+    st.divider()
+    render_research_casebook()
+
+
+def render_research_casebook():
+    """مركز ملف القضية: مواد متعددة، سجل ادعاءات، خط زمني، وموجّه بحثي موحد."""
+    st.markdown("### 🗃️ مركز الملفات البحثية")
+    st.caption("اجمع داخل ملف واحد الأخبار والتصريحات ومقالات الرأي والوثائق، ثم ابنِ خطاً زمنياً وسجل ادعاءات وخريطة خلاف قابلة للتحليل.")
+    cases = S().setdefault("research_cases", [])
+    S().setdefault("case_links", [])
+
+    with st.expander("➕ إنشاء ملف بحثي جديد", expanded=not bool(cases)):
+        with st.form("research_case_create_form"):
+            c_title = st.text_input("عنوان القضية", placeholder="مثال: مسارات التفاوض الأمريكي الإيراني")
+            c_desc = st.text_area("نطاق الملف والسؤال البحثي", placeholder="ما القضية؟ وما الأسئلة التي تريد الإجابة عنها؟", height=85)
+            c_tags = st.text_input("وسوم مفصولة بفواصل", placeholder="إيران، الولايات المتحدة، مفاوضات")
+            create_case = st.form_submit_button("إنشاء الملف البحثي", type="primary")
+        if create_case:
+            if not c_title.strip():
+                st.warning("اكتب عنواناً للملف أولاً.")
+            else:
+                rec = casebook_mod.new_case(c_title, c_desc, [x.strip() for x in re.split(r"[,،]", c_tags) if x.strip()])
+                cases.insert(0, rec)
+                st.session_state["research_case_active"] = rec["id"]
+                persist()
+                st.success("تم إنشاء الملف البحثي.")
+                st.rerun()
+
+    if len(cases) >= 2:
+        render_case_relationship_center(cases)
+
+    if not cases:
+        st.info("أنشئ أول ملف بحثي لتبدأ تجميع المواد وبناء سجل الأدلة.")
+        return
+
+    case_labels = {f"{x.get('title','ملف بلا عنوان')} · {len(x.get('materials', []))} مادة · {str(x.get('updated_at',''))[:10]}": x for x in cases}
+    active_id = st.session_state.get("research_case_active")
+    default_label = next((k for k, v in case_labels.items() if v.get("id") == active_id), next(iter(case_labels)))
+    picked_label = st.selectbox("الملف النشط", list(case_labels), index=list(case_labels).index(default_label), key="research_case_select")
+    case = case_labels[picked_label]
+    st.session_state["research_case_active"] = case["id"]
+
+    # تحديث وصف الملف والوسوم
+    with st.expander("⚙️ إعدادات الملف", expanded=False):
+        with st.form(f"research_case_meta_{case['id']}"):
+            new_title = st.text_input("اسم الملف", value=case.get("title", ""))
+            new_desc = st.text_area("وصف القضية", value=case.get("description", ""), height=75)
+            new_tags = st.text_input("الوسوم", value="، ".join(case.get("tags", [])))
+            new_notes = st.text_area("ملاحظات الباحث / أسئلة مفتوحة", value=case.get("research_notes", ""), height=90)
+            save_meta = st.form_submit_button("حفظ بيانات الملف")
+        if save_meta:
+            case.update({"title": new_title.strip(), "description": new_desc.strip(),
+                         "tags": [x.strip() for x in re.split(r"[,،]", new_tags) if x.strip()],
+                         "research_notes": new_notes.strip(), "updated_at": casebook_mod.now_iso()})
+            persist(); st.success("تم تحديث الملف."); st.rerun()
+
+    materials = case.get("materials", [])
+    claims = case.get("claims", [])
+    events = case.get("events", [])
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("المواد", len(materials))
+    m2.metric("الادعاءات", len(claims))
+    m3.metric("الأحداث", len(events))
+    m4.metric("المصادر", len({x.get('domain') or x.get('outlet') for x in materials if x.get('domain') or x.get('outlet')}))
+
+    st.markdown("#### 📥 إضافة مواد إلى الملف")
+    pool = list(_dos_pool().values())
+    pool += list(S().get("saved", []))
+    # إزالة التكرار بحسب الرابط
+    unique_pool, seen_urls = [], set()
+    for a in pool:
+        u = a.get("url") or a.get("link")
+        if u and u not in seen_urls:
+            seen_urls.add(u); unique_pool.append(a)
+    labels = {}
+    for i, a in enumerate(unique_pool):
+        title = a.get("title_ar") or a.get("title") or "بدون عنوان"
+        outlet = a.get("outlet") or a.get("source") or a.get("domain") or "مصدر غير محدد"
+        labels[f"{str(title)[:105]} · {outlet} · {str(a.get('date') or a.get('seendate') or '')[:10]} · {i+1}"] = a
+    with st.form(f"research_add_existing_{case['id']}"):
+        chosen = st.multiselect("اختر من نتائج البحث والمحفوظات", list(labels), help="يمكنك ضم عدة مواد دفعة واحدة.")
+        material_type = st.selectbox("نوع المواد المختارة", casebook_mod.MATERIAL_TYPES)
+        stance = st.text_input("زاوية / موقف مبدئي (اختياري)", placeholder="مثال: يدعم استمرار التفاوض، يعارض الاتفاق...")
+        add_selected = st.form_submit_button("إضافة المواد المختارة")
+    if add_selected:
+        added = 0
+        for label in chosen:
+            added += bool(casebook_mod.add_material(case, labels[label], material_type, stance))
+        persist()
+        st.success(f"تمت إضافة {added} مادة جديدة. المواد المكررة تم تجاوزها.")
+        st.rerun()
+
+    with st.expander("إضافة مادة يدوياً: تصريح أو مقال أو وثيقة", expanded=False):
+        with st.form(f"research_manual_material_{case['id']}"):
+            mm_title = st.text_input("العنوان أو نص التصريح المختصر")
+            mm_type = st.selectbox("نوع المادة", casebook_mod.MATERIAL_TYPES, key=f"manual_type_{case['id']}")
+            mm_author = st.text_input("الكاتب / المتحدث / الجهة")
+            mm_outlet = st.text_input("الصحيفة / المؤسسة / المصدر")
+            mm_date = st.text_input("تاريخ النشر أو التصريح", placeholder="2026-11-22")
+            mm_url = st.text_input("الرابط الأصلي")
+            mm_text = st.text_area("النص أو المقتطف المتاح", height=140)
+            mm_stance = st.text_input("الموقف أو الزاوية (اختياري)")
+            mm_save = st.form_submit_button("إضافة المادة إلى الملف")
+        if mm_save:
+            manual = {"title": mm_title, "title_ar": mm_title, "writer": mm_author, "outlet": mm_outlet,
+                      "date": mm_date, "url": mm_url, "domain": casebook_mod.domain(mm_url), "text": mm_text}
+            if not (mm_title.strip() or mm_text.strip() or mm_url.strip()):
+                st.warning("أدخل عنواناً أو نصاً أو رابطاً للمادة.")
+            else:
+                casebook_mod.add_material(case, manual, mm_type, mm_stance)
+                persist(); st.success("تمت إضافة المادة."); st.rerun()
+
+    st.markdown("#### 🧾 سجل الادعاءات والأدلة")
+    st.caption("سجّل ما تريد اختباره، وحدد هل هو واقعة أم ادعاء منسوب أم تفسير أو توقع، ثم دوّن حالة الدليل. هذا السجل لا يتحقق آلياً من صحة الادعاء.")
+    with st.form(f"research_claim_form_{case['id']}"):
+        claim_text = st.text_area("الادعاء / المعلومة المراد فحصها", height=75)
+        cc1, cc2 = st.columns(2)
+        claim_type = cc1.selectbox("طبيعة العبارة", casebook_mod.CLAIM_TYPES)
+        claim_status = cc2.selectbox("حالة الدليل الحالية", casebook_mod.EVIDENCE_STATUSES)
+        claim_source = st.text_input("رابط المصدر أو الوثيقة")
+        claim_note = st.text_input("ملاحظات / ما المطلوب للتحقق؟")
+        add_claim_btn = st.form_submit_button("إضافة إلى سجل الادعاءات")
+    if add_claim_btn:
+        try:
+            casebook_mod.add_claim(case, claim_text, claim_type, claim_status, claim_source, claim_note)
+            persist(); st.success("تم تسجيل الادعاء."); st.rerun()
+        except ValueError as exc:
+            st.warning(str(exc))
+
+    st.markdown("#### 🕒 الخط الزمني للقضية")
+    with st.form(f"research_event_form_{case['id']}"):
+        ec1, ec2 = st.columns([1, 3])
+        event_date = ec1.text_input("تاريخ الحدث", placeholder="2026-11-22")
+        event_title = ec2.text_input("عنوان الحدث")
+        event_detail = st.text_input("تفاصيل مختصرة")
+        event_source = st.text_input("مصدر / رابط الحدث")
+        add_event_btn = st.form_submit_button("إضافة حدث للخط الزمني")
+    if add_event_btn:
+        try:
+            casebook_mod.add_event(case, event_date, event_title, event_detail, event_source)
+            persist(); st.success("تمت إضافة الحدث."); st.rerun()
+        except ValueError as exc:
+            st.warning(str(exc))
+
+    # عرض السجلات وإتاحة الحذف المنفصل
+    if materials:
+        with st.expander(f"📰 المواد المرفقة ({len(materials)})", expanded=True):
+            for item in materials:
+                c1, c2 = st.columns([8, 1])
+                c1.markdown(f"**{item.get('title')}**  \n{item.get('type')} · {item.get('author')} · {item.get('outlet')} · {item.get('date')}")
+                if item.get("url"):
+                    c1.markdown(f"[فتح المصدر الأصلي]({item['url']})")
+                if item.get("text"):
+                    c1.caption(item.get("text", "")[:350])
+                if c2.button("حذف", key=f"rm_mat_{item['id']}"):
+                    casebook_mod.remove_item(case, "materials", item["id"]); persist(); st.rerun()
+    if claims:
+        with st.expander(f"🔎 الادعاءات المسجلة ({len(claims)})", expanded=False):
+            for item in claims:
+                c1, c2 = st.columns([8, 1])
+                c1.markdown(f"**{item.get('statement')}**  \n{item.get('type')} · الحالة: **{item.get('status')}**")
+                if item.get("source"):
+                    c1.markdown(f"[رابط الدليل]({item['source']})")
+                if item.get("note"):
+                    c1.caption(item["note"])
+                if c2.button("حذف", key=f"rm_claim_{item['id']}"):
+                    casebook_mod.remove_item(case, "claims", item["id"]); persist(); st.rerun()
+    if events:
+        with st.expander(f"📅 أحداث الخط الزمني ({len(events)})", expanded=False):
+            for item in sorted(events, key=lambda x: x.get("date") or "9999"):
+                c1, c2 = st.columns([8, 1])
+                c1.markdown(f"**{item.get('date')} · {item.get('title')}**  \n{item.get('detail')}")
+                if item.get("source"):
+                    c1.markdown(f"[مصدر الحدث]({item['source']})")
+                if c2.button("حذف", key=f"rm_event_{item['id']}"):
+                    casebook_mod.remove_item(case, "events", item["id"]); persist(); st.rerun()
+
+    st.markdown("#### 🧠 بناء التقرير التحليلي الشامل")
+    st.caption("ينتج برومبتاً مبنياً على محتويات الملف الفعلية: المواد، الادعاءات، والأحداث. انسخه إلى نموذج الذكاء الاصطناعي لتحليلها مع إظهار الفجوات وحدود الثقة.")
+    if st.button("إنشاء برومبت الملف البحثي", type="primary", key=f"build_case_prompt_{case['id']}", use_container_width=True):
+        st.session_state["research_case_prompt"] = casebook_mod.build_prompt(case)
+        st.session_state["research_case_prompt_name"] = case.get("title", "research_case")
+    if st.session_state.get("research_case_prompt"):
+        st.text_area("البرومبت الناتج", value=st.session_state["research_case_prompt"], height=360, key="research_case_prompt_display")
+        st.download_button("⬇️ تنزيل البرومبت TXT", data=st.session_state["research_case_prompt"],
+                           file_name="marsad_research_prompt.txt", mime="text/plain", key="download_research_prompt")
+
+    with st.expander("🧹 حذف الملف البحثي بالكامل", expanded=False):
+        st.warning("سيؤدي ذلك إلى حذف سجل هذا الملف ومواده وادعاءاته وأحداثه من التخزين الدائم.")
+        if st.button("حذف هذا الملف", key=f"delete_research_case_{case['id']}"):
+            S()["research_cases"] = [x for x in cases if x.get("id") != case.get("id")]
+            S()["case_links"] = [x for x in S().get("case_links", [])
+                                 if case.get("id") not in {x.get("case_a"), x.get("case_b")}]
+            persist(); st.session_state.pop("research_case_active", None); st.success("تم حذف الملف وروابطه."); st.rerun()
+
+
+
+def render_case_relationship_center(cases):
+    """اقتراح ومراجعة الروابط بين الملفات البحثية مع إظهار أسباب كل رابط."""
+    st.markdown("#### 🕸️ شبكة العلاقات بين الملفات")
+    st.caption("يبحث عن كيانات ووسوم ومفردات مشتركة بين ملفاتك. كل نتيجة اقتراح قابل للمراجعة، وليست إثباتاً لعلاقة سببية أو تنسيق بين الأطراف.")
+    saved_links = S().setdefault("case_links", [])
+    accepted = [x for x in saved_links if x.get("status") == "accepted"]
+    suggested = [x for x in saved_links if x.get("status") == "suggested"]
+    rejected = [x for x in saved_links if x.get("status") == "rejected"]
+    a, b, c = st.columns(3)
+    a.metric("روابط معتمدة", len(accepted))
+    b.metric("اقتراحات للمراجعة", len(suggested))
+    c.metric("مرفوضة", len(rejected))
+    controls = st.columns([3, 1])
+    threshold = controls[0].select_slider("حساسية اكتشاف التقاطعات", options=[12, 18, 25, 35, 45], value=18,
+        format_func=lambda x: {12: "مرتفعة جداً", 18: "مرتفعة", 25: "متوازنة", 35: "متحفظة", 45: "صارمة"}[x])
+    if controls[1].button("🔍 حلّل التقاطعات", type="primary", use_container_width=True, key="run_case_link_scan"):
+        fresh = case_links_mod.suggest_links(cases, min_score=threshold)
+        S()["case_links"] = case_links_mod.merge_suggestions(saved_links, fresh)
+        persist()
+        st.success(f"انتهى الفحص. تم تحديث {len(fresh)} اقتراحاً.")
+        st.rerun()
+
+    # إنشاء رابط يدوي مفيد عندما يعرف الباحث صلة لا تلتقطها الكلمات.
+    with st.expander("➕ اربط ملفين يدوياً", expanded=False):
+        labels = {f"{x.get('title', 'ملف')} · {len(x.get('materials', []))} مادة · {x.get('id', '')[-6:]}": x for x in cases}
+        with st.form("manual_case_link_form"):
+            left = st.selectbox("الملف الأول", list(labels), key="manual_case_link_a")
+            right = st.selectbox("الملف الثاني", list(labels), index=min(1, len(labels)-1), key="manual_case_link_b")
+            note = st.text_area("سبب الربط أو الفرضية التي تريد اختبارها", height=70)
+            submit = st.form_submit_button("حفظ العلاقة")
+        if submit:
+            try:
+                rec = case_links_mod.create_manual_link(labels[left], labels[right], note)
+                existing = S().setdefault("case_links", [])
+                key = {rec["case_a"], rec["case_b"]}
+                existing[:] = [x for x in existing if {x.get("case_a"), x.get("case_b")} != key]
+                existing.append(rec)
+                persist(); st.success("تم حفظ العلاقة اليدوية."); st.rerun()
+            except ValueError as exc:
+                st.warning(str(exc))
+
+    links = S().get("case_links", [])
+    accepted = [x for x in links if x.get("status") == "accepted"]
+    suggested = [x for x in links if x.get("status") == "suggested"]
+    show_suggestions = st.checkbox("إظهار الاقتراحات غير المعتمدة على الرسم", value=False, key="case_graph_suggestions")
+    graph = case_links_mod.graph_data(cases, links, include_suggested=show_suggestions)
+    if graph["edges"]:
+        def _dot_escape(value):
+            return str(value or "").replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+        dot = ["graph Marsad {", "rankdir=LR;", "overlap=false;", "splines=true;", "node [shape=box, style=rounded];"]
+        for node in graph["nodes"]:
+            dot.append(f'"{_dot_escape(node["id"])}" [label="{_dot_escape(node["label"])}\n{node["materials"]} مادة"];')
+        for edge in graph["edges"]:
+            style = "dashed" if edge.get("status") == "suggested" else "solid"
+            dot.append(f'"{_dot_escape(edge["source"])}" -- "{_dot_escape(edge["target"])}" [label="{_dot_escape(edge["label"])}", style={style}];')
+        dot.append("}")
+        st.graphviz_chart("\n".join(dot), use_container_width=True)
+    if accepted or suggested:
+        prompt_link_options = {f"{x.get('title_a')} ↔ {x.get('title_b')} · {x.get('id')[-8:]}": x for x in accepted + suggested}
+        chosen_link_label = st.selectbox("جهّز برومبت لفحص علاقة بين ملفين", list(prompt_link_options), key="case_link_prompt_select")
+        if st.button("🧠 إنشاء برومبت فحص العلاقة", key="build_case_link_prompt", use_container_width=True):
+            selected_link = prompt_link_options[chosen_link_label]
+            by_id = {x.get("id"): x for x in cases}
+            st.session_state["case_link_prompt"] = case_links_mod.build_link_prompt(
+                by_id.get(selected_link.get("case_a"), {}), by_id.get(selected_link.get("case_b"), {}), selected_link)
+        if st.session_state.get("case_link_prompt"):
+            st.text_area("برومبت فحص العلاقة بين الملفين", value=st.session_state["case_link_prompt"], height=300, key="case_link_prompt_display")
+            st.download_button("⬇️ تنزيل برومبت فحص العلاقة", data=st.session_state["case_link_prompt"],
+                file_name="marsad_case_link_analysis.txt", mime="text/plain", key="download_case_link_prompt")
+    if accepted:
+        with st.expander(f"🧩 شبكة الروابط المعتمدة ({len(accepted)})", expanded=True):
+            for link in accepted:
+                st.markdown(f"**{link.get('title_a')}**  ↔  **{link.get('title_b')}**")
+                st.caption(f"قوة التشابه الإرشادية: {link.get('level')} · الدرجة {link.get('score')}/100")
+                if link.get("user_note"):
+                    st.write("ملاحظة الباحث: " + link["user_note"])
+                for reason in link.get("reasons", []):
+                    st.write("• " + reason)
+                if link.get("evidence_examples"):
+                    with st.container(border=True):
+                        for ex in link["evidence_examples"]:
+                            st.markdown(f"**{ex.get('entity')}**")
+                            st.write("الملف الأول: " + ("؛ ".join(ex.get("case_a_materials", [])) or "لا توجد مادة بعنوان مطابق"))
+                            st.write("الملف الثاني: " + ("؛ ".join(ex.get("case_b_materials", [])) or "لا توجد مادة بعنوان مطابق"))
+                st.caption(link.get("caveat", ""))
+                if st.button("إلغاء اعتماد الرابط", key=f"unlink_case_{link.get('id')}"):
+                    case_links_mod.set_status(S()["case_links"], link.get("id"), "suggested")
+                    persist(); st.rerun()
+                st.divider()
+    if suggested:
+        with st.expander(f"💡 اقتراحات الربط للمراجعة ({len(suggested)})", expanded=True):
+            for link in suggested[:30]:
+                st.markdown(f"**{link.get('title_a')}**  ↔  **{link.get('title_b')}**")
+                st.caption(f"التشابه: {link.get('level')} · الدرجة الإرشادية {link.get('score')}/100")
+                for reason in link.get("reasons", []):
+                    st.write("• " + reason)
+                if link.get("evidence_examples"):
+                    with st.container(border=True):
+                        for ex in link["evidence_examples"]:
+                            st.markdown(f"**{ex.get('entity')}**")
+                            st.write("الملف الأول: " + ("؛ ".join(ex.get("case_a_materials", [])) or "لا توجد مادة بعنوان مطابق"))
+                            st.write("الملف الثاني: " + ("؛ ".join(ex.get("case_b_materials", [])) or "لا توجد مادة بعنوان مطابق"))
+                st.caption(link.get("caveat", ""))
+                x1, x2 = st.columns(2)
+                if x1.button("اعتماد العلاقة", key=f"accept_case_link_{link.get('id')}", use_container_width=True):
+                    case_links_mod.set_status(S()["case_links"], link.get("id"), "accepted")
+                    persist(); st.rerun()
+                if x2.button("رفض الاقتراح", key=f"reject_case_link_{link.get('id')}", use_container_width=True):
+                    case_links_mod.set_status(S()["case_links"], link.get("id"), "rejected")
+                    persist(); st.rerun()
+                st.divider()
+    if not accepted and not suggested:
+        st.info("لم تُحلل العلاقات بعد. اضغط «حلّل التقاطعات» لاكتشاف الروابط المحتملة بين ملفاتك.")
+
+    render_early_warning_center()
+
+
+def render_early_warning_center():
+    """مركز الإنذار المبكر: مقارنة المواد الجديدة بخط أساس محفوظ."""
+    st.divider()
+    st.markdown("### 🚨 مركز الإنذار المبكر والتحليل الاستراتيجي")
+    st.caption("يرصد ما أُضيف منذ آخر فحص، والكيانات الجديدة، والإشارات اللغوية. لا يصدر حكماً آلياً بأن موقفاً سياسياً تغيّر.")
+    cases = S().get("research_cases", [])
+    state = S().setdefault("early_warning", {"baselines": {}, "reports": [], "last_scan": ""})
+    c1, c2 = st.columns([2, 1])
+    c1.caption("أول فحص لكل ملف ينشئ خط أساس فقط؛ الإنذارات تظهر عند إضافة مواد بعد ذلك.")
+    if c2.button("🔍 افحص التغييرات الآن", key="early_warning_scan", type="primary", use_container_width=True):
+        updated, alerts, initialized = early_warning_mod.scan_cases(cases, state)
+        S()["early_warning"] = updated
+        persist()
+        st.session_state["early_warning_last_alerts"] = alerts
+        st.session_state["early_warning_initialized"] = initialized
+        st.rerun()
+    initialized = st.session_state.get("early_warning_initialized", [])
+    if initialized:
+        st.info("تم إنشاء خط أساس لأول مرة للملفات: " + "، ".join(initialized) + ". أضف مواداً جديدة ثم أعد الفحص لرصد التغييرات.")
+    alerts = st.session_state.get("early_warning_last_alerts", [])
+    if alerts:
+        st.success(f"تم رصد تغييرات في {len(alerts)} ملف/ملفات.")
+        for alert in alerts:
+            with st.expander(f"🚨 {alert.get('case_title')} · {len(alert.get('new_materials', []))} مادة جديدة", expanded=True):
+                if alert.get("new_entities"):
+                    st.write("**كيانات ظهرت لأول مرة في الملف:** " + "، ".join(alert["new_entities"]))
+                for item in alert.get("new_materials", []):
+                    st.markdown(f"**{item.get('title')}**")
+                    st.caption(f"{item.get('type')} · {item.get('outlet')} · {item.get('date')} · الكاتب: {item.get('author')}")
+                    if item.get("url"):
+                        st.markdown(f"[فتح المصدر الأصلي]({item['url']})")
+                    if item.get("signals"):
+                        for group, terms in item["signals"].items():
+                            st.warning(f"إشارة لغوية محتملة ({group}): " + "، ".join(terms))
+                    elif not item.get("text_available"):
+                        st.caption("المادة محفوظة دون نص كامل؛ لا يمكن تحليل تحول اللغة من العنوان وحده.")
+                st.caption(alert.get("note", ""))
+        daily_md = early_warning_mod.build_daily_brief(alerts)
+        st.download_button("⬇️ تنزيل موجز التغييرات", daily_md, file_name="marsad_early_warning.md", key="early_warning_download")
+        prompt = early_warning_mod.build_analysis_prompt(alerts)
+        with st.expander("🧠 برومبت التحليل الاستراتيجي للتغييرات"):
+            st.code(prompt, language=None)
+            st.download_button("تنزيل البرومبت", prompt, file_name="early_warning_analysis_prompt.txt", key="early_warning_prompt_download")
+    else:
+        st.info("لا توجد نتائج فحص جديدة في هذه الجلسة. نفّذ الفحص بعد إضافة مواد جديدة إلى ملفاتك.")
+    history = (S().get("early_warning") or {}).get("reports", [])
+    if history:
+        with st.expander(f"📚 سجل الإنذارات السابقة ({len(history)})"):
+            for item in reversed(history[-30:]):
+                st.write(f"**{item.get('case_title')}** · {item.get('created_at')} · {len(item.get('new_materials', []))} مادة جديدة")
+
+
 def render_dossiers(P="pol"):
+
     ss = st.session_state
     sx, egp = PROFS[P]["sx"], P == "eg"
     if egp:
@@ -3351,9 +3929,12 @@ with tab_dr:
 
 with tab_dos:
     render_dossiers()
+    render_custom_collections("pol")
 
 with tab_sv:
     render_saved()
+with tab_lab:
+    render_analysis_lab()
 
 with tab_ms:
     with st.expander("🎧 إعدادات القراءة الصوتية (للمترو والسماعات)"):

@@ -75,6 +75,16 @@ WRITERS = [
     W("dubowitz", "مارك دوبوفيتز", "Mark Dubowitz", "مؤسسة الدفاع عن الديمقراطيات", "US", "رأي", ["fdd.org", "wsj.com"]),
     W("nasr", "فالي نصر", "Vali Nasr", "جونز هوبكنز", "US", "رأي", ["foreignaffairs.com", "nytimes.com"]),
     W("boot", "ماكس بوت", "Max Boot", "واشنطن بوست", "US", "رأي", ["washingtonpost.com"]),
+    W("lynch", "مارك لينش", "Marc Lynch", "جامعة جورج واشنطن / فورين أفيرز", "US", "تحليل",
+      ["foreignaffairs.com", "foreignpolicy.com"], aliases=["Marc F. Lynch"], default=True),
+    W("byman", "دانيال بايمان", "Daniel Byman", "CSIS / فورين أفيرز", "US", "تحليل",
+      ["foreignaffairs.com", "csis.org", "lawfaremedia.org"], default=True),
+    W("telhami", "شيبلي تلحمي", "Shibley Telhami", "بروكينجز / جامعة ميريلاند", "US", "رأي",
+      ["brookings.edu", "foreignaffairs.com"], default=True),
+    W("parsi", "تريتا بارسي", "Trita Parsi", "معهد كوينسي / Responsible Statecraft", "US", "رأي",
+      ["quincyinst.org", "responsiblestatecraft.org"], default=True),
+    W("katulis", "براين كاتوليس", "Brian Katulis", "معهد الشرق الأوسط", "US", "تحليل",
+      ["mei.edu"], default=True),
     # ── بريطانيون (إضافات) ──
     W("oliphant", "رولاند أوليفانت", "Roland Oliphant", "التلغراف", "UK", "تحليل", ["telegraph.co.uk"]),
     W("rainey", "فينيشيا رايني", "Venetia Rainey", "التلغراف", "UK", "تحليل", ["telegraph.co.uk"]),
@@ -82,6 +92,12 @@ WRITERS = [
     W("shenker", "جاك شينكر", "Jack Shenker", "الغارديان", "UK", "رأي", ["theguardian.com"]),
     W("maghafi", "نوال المغافي", "Nawal Al-Maghafi", "بي بي سي", "UK", "تحليل", ["bbc.com", "bbc.co.uk"]),
     W("gardner", "فرانك غاردنر", "Frank Gardner", "بي بي سي", "UK", "تحليل", ["bbc.com", "bbc.co.uk"]),
+    W("hokayem", "إميل هوكايم", "Emile Hokayem", "المعهد الدولي للدراسات الاستراتيجية", "UK", "تحليل",
+      ["iiss.org"], default=True),
+    W("tisdall", "سايمون تيسدال", "Simon Tisdall", "الجارديان", "UK", "رأي",
+      ["theguardian.com"], default=True),
+    W("davidgardner", "ديفيد غاردنر", "David Gardner", "فاينانشال تايمز", "UK", "رأي",
+      ["ft.com"], default=True),
     W("guerin", "أورلا غيرين", "Orla Guerin", "بي بي سي", "UK", "خبر", ["bbc.com", "bbc.co.uk"]),
     # ── إسرائيليون ──
     W("barel", "تسفي بارئيل", "Zvi Bar'el", "هآرتس", "IL", "تحليل", ["haaretz.com"], aliases=["Zvi Bar’el"],
@@ -111,6 +127,15 @@ WRITERS = [
     W("anghel", "إيتاي أنجل", "Itai Anghel", "القناة 12", "IL", "خبر", ["timesofisrael.com"], heb=("איתי אנגל", ["mako.co.il"])),
     W("yehezkeli", "تسفي يحزقيلي", "Zvi Yehezkeli", "القناة 13 / 12", "IL", "تحليل", ["timesofisrael.com", "jpost.com"],
       heb=("צבי יחזקאלי", ["13tv.co.il", "mako.co.il"])),
+    W("alufbenn", "ألوف بن", "Aluf Benn", "هآرتس", "IL", "رأي", ["haaretz.com"],
+      heb=("אלוף בן", ["haaretz.co.il"]), default=True),
+    W("yossimelman", "يوسي ميلمان", "Yossi Melman", "هآرتس / معاريف", "IL", "تحليل",
+      ["haaretz.com", "maariv.co.il"], default=True),
+    # ── كتّاب عرب ──
+    W("atwan", "عبد الباري عطوان", "Abdel Bari Atwan", "رأي اليوم", "AR", "رأي", ["raialyoum.com"], default=True),
+    W("sharbel", "غسان شربل", "Ghassan Charbel", "الشرق الأوسط", "AR", "رأي", ["aawsat.com"], default=True),
+    W("alrashed", "عبد الرحمن الراشد", "Abdulrahman Al-Rashed", "الشرق الأوسط", "SA", "رأي",
+      ["aawsat.com", "asharq.com"], default=True),
 ]
 
 WRITER_GROUPS = {

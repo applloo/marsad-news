@@ -69,6 +69,27 @@ USA = {
         ("CSIS", "csis.org", "en"),
         ("Baker Institute (Rice)", "bakerinstitute.org", "en"),
     ],
+    "🛰️ دفاع وأمن وتحقيقات مفتوحة": [
+        ("Defense News", "defensenews.com", "en"),
+        ("Breaking Defense", "breakingdefense.com", "en"),
+        ("The War Zone", "twz.com", "en"),
+        ("War on the Rocks", "warontherocks.com", "en"),
+        ("Institute for the Study of War", "understandingwar.org", "en"),
+        ("Bellingcat", "bellingcat.com", "en"),
+        ("Lawfare", "lawfaremedia.org", "en"),
+        ("Just Security", "justsecurity.org", "en"),
+        ("Semafor", "semafor.com", "en"),
+    ],
+    "🌍 صحافة دولية ناطقة بالإنجليزية": [
+        ("The National", "thenationalnews.com", "en"),
+        ("Arab News", "arabnews.com", "en"),
+        ("Al Jazeera English", "aljazeera.com", "en"),
+        ("The New Humanitarian", "thenewhumanitarian.org", "en"),
+        ("Deutsche Welle (DW)", "dw.com", "en"),
+        ("France 24", "france24.com", "en"),
+        ("Euronews", "euronews.com", "en"),
+        ("Agence France-Presse (AFP)", "afp.com", "en"),
+    ],
 }
 
 UK = {
@@ -92,6 +113,8 @@ UK = {
         ("RUSI", "rusi.org", "en"),
         ("openDemocracy", "opendemocracy.net", "en"),
         ("France 24 (إنجليزي)", "france24.com", "en"),
+        ("IISS – المعهد الدولي للدراسات الاستراتيجية", "iiss.org", "en"),
+        ("The Africa Report", "theafricareport.com", "en"),
     ],
 }
 
@@ -261,7 +284,7 @@ REGION = {
 # ───────── بلد كل مصدر (لإظهاره بجانب اسمه في كل مكان) ─────────
 FLAGS = {"إسرائيل": "🇮🇱", "أمريكا": "🇺🇸", "بريطانيا": "🇬🇧", "مصر": "🇪🇬", "السعودية": "🇸🇦", "الإمارات": "🇦🇪", "قطر": "🇶🇦",
          "لبنان": "🇱🇧", "تركيا": "🇹🇷", "إيران": "🇮🇷", "إثيوبيا": "🇪🇹", "فرنسا": "🇫🇷", "السويد": "🇸🇪", "بلجيكا": "🇧🇪",
-         "جنوب أفريقيا": "🇿🇦", "هولندا": "🇳🇱", "الأمم المتحدة": "🇺🇳", "أوروبا": "🇪🇺", "السودان": "🇸🇩"}
+         "جنوب أفريقيا": "🇿🇦", "هولندا": "🇳🇱", "الأمم المتحدة": "🇺🇳", "أوروبا": "🇪🇺", "السودان": "🇸🇩", "سويسرا": "🇨🇭"}
 _TLD = {"il": "إسرائيل", "uk": "بريطانيا", "tr": "تركيا", "ir": "إيران", "et": "إثيوبيا", "eg": "مصر", "sa": "السعودية", "ae": "الإمارات",
         "qa": "قطر", "lb": "لبنان", "fr": "فرنسا", "se": "السويد", "sd": "السودان", "za": "جنوب أفريقيا", "nl": "هولندا", "eu": "أوروبا"}
 _OVERRIDE = {
@@ -279,6 +302,9 @@ _OVERRIDE = {
     "israel-alma.org": "إسرائيل", "besacenter.org": "إسرائيل", "egyptindependent.com": "مصر", "dailynewsegypt.com": "مصر",
     "egypttoday.com": "مصر",
     "khamenei.ir": "إيران", "presstv.ir": "إيران", "alalam.ir": "إيران",
+    "thenationalnews.com": "الإمارات", "arabnews.com": "السعودية", "aljazeera.com": "قطر",
+    "thenewhumanitarian.org": "سويسرا", "theafricareport.com": "فرنسا",
+    "dw.com": "ألمانيا", "france24.com": "فرنسا", "euronews.com": "فرنسا", "afp.com": "فرنسا",
 }
 FLAGS.update({"ألمانيا": "🇩🇪", "أوكرانيا": "🇺🇦"})
 _DOM_COUNTRY = dict(_OVERRIDE)

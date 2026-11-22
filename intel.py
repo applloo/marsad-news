@@ -38,6 +38,9 @@ SOURCES = [
     ("Arab Center Washington DC", "arabcenterdc.org", "reg", "think", "السياسات العربية والأمن الإقليمي"),
     ("Washington Institute", "washingtoninstitute.org", "us", "think", "إسرائيل وإيران والخليج"),
     ("Atlantic Council", "atlanticcouncil.org", "us", "think", "السياسة الأمريكية والتحالفات"),
+    ("Foundation for Defense of Democracies", "fdd.org", "us", "think", "العقوبات وإيران والأمن الإقليمي"),
+    ("The Soufan Center", "thesoufancenter.org", "us", "think", "مكافحة الإرهاب والشبكات المسلحة والأمن"),
+    ("Center for a New American Security", "cnas.org", "us", "think", "الدفاع والسياسة الخارجية الأمريكية"),
     ("Africa Center for Strategic Studies", "africacenter.org", "reg", "think", "أفريقيا والقرن الأفريقي والأمن"),
     ("ISS Africa", "issafrica.org", "reg", "think", "السودان وإثيوبيا والصومال والبحر الأحمر"),
     ("Ahram Online / الأهرام", "ahram.org.eg", "eg", "media", "الموقف الرسمي والإعلام المصري"),
@@ -54,6 +57,12 @@ SOURCES = [
     ("Liveuamap", "liveuamap.com", "osint", "data", "الأحداث الميدانية على الخرائط"),
     ("UN Digital Library", "digitallibrary.un.org", "osint", "official", "تقارير ووثائق الأمم المتحدة"),
     ("ReliefWeb", "reliefweb.int", "osint", "official", "تقارير الأزمات والنزاعات الإنسانية"),
+    ("UN OCHA", "unocha.org", "osint", "official", "بيانات الاحتياجات الإنسانية والاستجابة للأزمات"),
+    ("UNHCR", "unhcr.org", "osint", "official", "بيانات اللاجئين والنزوح"),
+    ("International Organization for Migration", "iom.int", "osint", "official", "الهجرة والنزوح وحركة السكان"),
+    ("World Bank", "worldbank.org", "osint", "data", "مؤشرات الاقتصاد والتنمية والديون"),
+    ("International Monetary Fund", "imf.org", "osint", "data", "تقارير الاقتصاد الكلي وبرامج التمويل"),
+    ("US Energy Information Administration", "eia.gov", "us", "official", "بيانات الطاقة والإنتاج والتجارة"),
 ]
 
 # الملفات المترابطة الستة: (كلمات بحث افتراضية بالإنجليزية، الأطراف، أسئلة الربط)

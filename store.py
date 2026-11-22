@@ -10,7 +10,8 @@ API = "https://api.github.com/gists/"
 
 
 def empty():
-    return {"saved": [], "sources": [], "writers": [], "keys": [], "watch_topics": "", "posts": []}
+    return {"saved": [], "sources": [], "writers": [], "keys": [], "watch_topics": "", "posts": [],
+            "custom_dossiers": [], "custom_threads": [], "analysis_cases": [], "research_cases": [], "case_links": [], "early_warning": {"baselines": {}, "reports": [], "last_scan": ""}, "outlet_profiles": {}, "writer_profiles": {}}
 
 
 def normalize(data):
@@ -20,6 +21,14 @@ def normalize(data):
             if isinstance(out[k], list) and isinstance(data.get(k), list):
                 out[k] = data[k]
             elif isinstance(out[k], str) and isinstance(data.get(k), str):
+                out[k] = data[k]
+        for k in ("custom_dossiers", "custom_threads", "analysis_cases", "research_cases", "case_links"):
+            if isinstance(data.get(k), list):
+                out[k] = data[k]
+        if isinstance(data.get("early_warning"), dict):
+            out["early_warning"] = data["early_warning"]
+        for k in ("outlet_profiles", "writer_profiles"):
+            if isinstance(data.get(k), dict):
                 out[k] = data[k]
     return out
 
@@ -58,6 +67,11 @@ def merge(base, extra):
     base["sources"] += [x for x in extra["sources"] if (x.get("domain"), x.get("group")) not in seen]
     seen = {x.get("id") for x in base["writers"]}
     base["writers"] += [x for x in extra["writers"] if x.get("id") not in seen]
+    for key in ("custom_dossiers", "custom_threads", "analysis_cases", "research_cases", "case_links"):
+        seen = {x.get("id") for x in base[key]}
+        base[key] += [x for x in extra[key] if x.get("id") not in seen]
+    for key in ("outlet_profiles", "writer_profiles"):
+        base[key].update({k: v for k, v in extra[key].items() if k not in base[key]})
     # الشفرات لا تُدمج من النسخ الاحتياطية (تبقى كما هي في الـGist)
     return base
 
